@@ -1,0 +1,282 @@
+   1               		.file	"keymap_jack.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               		.section	.text.matrix_power_up,"ax",@progbits
+  11               		.weak	matrix_power_up
+  13               	matrix_power_up:
+  14               	.LFB4:
+  15               		.file 1 "../../common/keyboard.h"
+   1:../../common/keyboard.h **** /*
+   2:../../common/keyboard.h **** Copyright 2011,2012,2013 Jun Wako <wakojun@gmail.com>
+   3:../../common/keyboard.h **** 
+   4:../../common/keyboard.h **** This program is free software: you can redistribute it and/or modify
+   5:../../common/keyboard.h **** it under the terms of the GNU General Public License as published by
+   6:../../common/keyboard.h **** the Free Software Foundation, either version 2 of the License, or
+   7:../../common/keyboard.h **** (at your option) any later version.
+   8:../../common/keyboard.h **** 
+   9:../../common/keyboard.h **** This program is distributed in the hope that it will be useful,
+  10:../../common/keyboard.h **** but WITHOUT ANY WARRANTY; without even the implied warranty of
+  11:../../common/keyboard.h **** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  12:../../common/keyboard.h **** GNU General Public License for more details.
+  13:../../common/keyboard.h **** 
+  14:../../common/keyboard.h **** You should have received a copy of the GNU General Public License
+  15:../../common/keyboard.h **** along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  16:../../common/keyboard.h **** */
+  17:../../common/keyboard.h **** 
+  18:../../common/keyboard.h **** #ifndef KEYBOARD_H
+  19:../../common/keyboard.h **** #define KEYBOARD_H
+  20:../../common/keyboard.h **** 
+  21:../../common/keyboard.h **** #include <stdbool.h>
+  22:../../common/keyboard.h **** #include <stdint.h>
+  23:../../common/keyboard.h **** 
+  24:../../common/keyboard.h **** 
+  25:../../common/keyboard.h **** #ifdef __cplusplus
+  26:../../common/keyboard.h **** extern "C" {
+  27:../../common/keyboard.h **** #endif
+  28:../../common/keyboard.h **** 
+  29:../../common/keyboard.h **** /* key matrix position */
+  30:../../common/keyboard.h **** typedef struct {
+  31:../../common/keyboard.h ****     uint8_t col;
+  32:../../common/keyboard.h ****     uint8_t row;
+  33:../../common/keyboard.h **** } keypos_t;
+  34:../../common/keyboard.h **** 
+  35:../../common/keyboard.h **** /* key event */
+  36:../../common/keyboard.h **** typedef struct {
+  37:../../common/keyboard.h ****     keypos_t key;
+  38:../../common/keyboard.h ****     bool     pressed;
+  39:../../common/keyboard.h ****     uint16_t time;
+  40:../../common/keyboard.h **** } keyevent_t;
+  41:../../common/keyboard.h **** 
+  42:../../common/keyboard.h **** /* equivalent test of keypos_t */
+  43:../../common/keyboard.h **** #define KEYEQ(keya, keyb)       ((keya).row == (keyb).row && (keya).col == (keyb).col)
+  44:../../common/keyboard.h **** 
+  45:../../common/keyboard.h **** /* Rules for No Event:
+  46:../../common/keyboard.h ****  * 1) (time == 0) to handle (keyevent_t){} as empty event
+  47:../../common/keyboard.h ****  * 2) Matrix(255, 255) to make TICK event available
+  48:../../common/keyboard.h ****  */
+  49:../../common/keyboard.h **** static inline bool IS_NOEVENT(keyevent_t event) { return event.time == 0 || (event.key.row == 255 &
+  50:../../common/keyboard.h **** static inline bool IS_PRESSED(keyevent_t event) { return (!IS_NOEVENT(event) && event.pressed); }
+  51:../../common/keyboard.h **** static inline bool IS_RELEASED(keyevent_t event) { return (!IS_NOEVENT(event) && !event.pressed); }
+  52:../../common/keyboard.h **** 
+  53:../../common/keyboard.h **** /* Tick event */
+  54:../../common/keyboard.h **** #define TICK                    (keyevent_t){           \
+  55:../../common/keyboard.h ****     .key = (keypos_t){ .row = 255, .col = 255 },           \
+  56:../../common/keyboard.h ****     .pressed = false,                                   \
+  57:../../common/keyboard.h ****     .time = (timer_read() | 1)                          \
+  58:../../common/keyboard.h **** }
+  59:../../common/keyboard.h **** 
+  60:../../common/keyboard.h **** 
+  61:../../common/keyboard.h **** void keyboard_init(void);
+  62:../../common/keyboard.h **** void keyboard_task(void);
+  63:../../common/keyboard.h **** void keyboard_set_leds(uint8_t leds);
+  64:../../common/keyboard.h **** 
+  65:../../common/keyboard.h **** __attribute__ ((weak)) void matrix_power_up(void) {}
+  16               		.loc 1 65 0
+  17               		.cfi_startproc
+  18               	/* prologue: function */
+  19               	/* frame size = 0 */
+  20               	/* stack size = 0 */
+  21               	.L__stack_usage = 0
+  22 0000 0895      		ret
+  23               		.cfi_endproc
+  24               	.LFE4:
+  26               		.section	.text.matrix_power_down,"ax",@progbits
+  27               		.weak	matrix_power_down
+  29               	matrix_power_down:
+  30               	.LFB5:
+  66:../../common/keyboard.h **** __attribute__ ((weak)) void matrix_power_down(void) {}
+  31               		.loc 1 66 0
+  32               		.cfi_startproc
+  33               	/* prologue: function */
+  34               	/* frame size = 0 */
+  35               	/* stack size = 0 */
+  36               	.L__stack_usage = 0
+  37 0000 0895      		ret
+  38               		.cfi_endproc
+  39               	.LFE5:
+  41               	.global	fn_actions
+  42               		.section	.progmem.data,"a",@progbits
+  45               	fn_actions:
+  46 0000 F1A1      		.word	-24079
+  47               	.global	keymaps
+  50               	keymaps:
+  51 0002 2900      		.word	41
+  52 0004 1E00      		.word	30
+  53 0006 1F00      		.word	31
+  54 0008 2000      		.word	32
+  55 000a 2100      		.word	33
+  56 000c 2200      		.word	34
+  57 000e 2300      		.word	35
+  58 0010 2400      		.word	36
+  59 0012 2500      		.word	37
+  60 0014 2600      		.word	38
+  61 0016 2700      		.word	39
+  62 0018 2D00      		.word	45
+  63 001a 2E00      		.word	46
+  64 001c 0000      		.word	0
+  65 001e 2A00      		.word	42
+  66 0020 2B00      		.word	43
+  67 0022 1400      		.word	20
+  68 0024 1A00      		.word	26
+  69 0026 0800      		.word	8
+  70 0028 1500      		.word	21
+  71 002a 1700      		.word	23
+  72 002c 1C00      		.word	28
+  73 002e 1800      		.word	24
+  74 0030 0C00      		.word	12
+  75 0032 1200      		.word	18
+  76 0034 1300      		.word	19
+  77 0036 2F00      		.word	47
+  78 0038 3000      		.word	48
+  79 003a 4A00      		.word	74
+  80 003c 4D00      		.word	77
+  81 003e C000      		.word	192
+  82 0040 0400      		.word	4
+  83 0042 1600      		.word	22
+  84 0044 0700      		.word	7
+  85 0046 0900      		.word	9
+  86 0048 0A00      		.word	10
+  87 004a 0B00      		.word	11
+  88 004c 0D00      		.word	13
+  89 004e 0E00      		.word	14
+  90 0050 0F00      		.word	15
+  91 0052 3300      		.word	51
+  92 0054 3400      		.word	52
+  93 0056 0000      		.word	0
+  94 0058 2800      		.word	40
+  95 005a 4B00      		.word	75
+  96 005c E100      		.word	225
+  97 005e 1D00      		.word	29
+  98 0060 1B00      		.word	27
+  99 0062 0600      		.word	6
+ 100 0064 1900      		.word	25
+ 101 0066 0500      		.word	5
+ 102 0068 1100      		.word	17
+ 103 006a 1000      		.word	16
+ 104 006c 3600      		.word	54
+ 105 006e 3700      		.word	55
+ 106 0070 3800      		.word	56
+ 107 0072 0000      		.word	0
+ 108 0074 E500      		.word	229
+ 109 0076 5200      		.word	82
+ 110 0078 4E00      		.word	78
+ 111 007a E000      		.word	224
+ 112 007c E300      		.word	227
+ 113 007e E200      		.word	226
+ 114 0080 0000      		.word	0
+ 115 0082 0000      		.word	0
+ 116 0084 0000      		.word	0
+ 117 0086 2C00      		.word	44
+ 118 0088 0000      		.word	0
+ 119 008a 0000      		.word	0
+ 120 008c 0000      		.word	0
+ 121 008e 3500      		.word	53
+ 122 0090 4C00      		.word	76
+ 123 0092 5000      		.word	80
+ 124 0094 5100      		.word	81
+ 125 0096 4F00      		.word	79
+ 126 0098 2900      		.word	41
+ 127 009a 3A00      		.word	58
+ 128 009c 3B00      		.word	59
+ 129 009e 3C00      		.word	60
+ 130 00a0 3D00      		.word	61
+ 131 00a2 3E00      		.word	62
+ 132 00a4 3F00      		.word	63
+ 133 00a6 4000      		.word	64
+ 134 00a8 4100      		.word	65
+ 135 00aa 4200      		.word	66
+ 136 00ac 4300      		.word	67
+ 137 00ae 4400      		.word	68
+ 138 00b0 4500      		.word	69
+ 139 00b2 0000      		.word	0
+ 140 00b4 2A00      		.word	42
+ 141 00b6 2B00      		.word	43
+ 142 00b8 0100      		.word	1
+ 143 00ba 0100      		.word	1
+ 144 00bc 0100      		.word	1
+ 145 00be 0100      		.word	1
+ 146 00c0 0100      		.word	1
+ 147 00c2 0100      		.word	1
+ 148 00c4 2400      		.word	36
+ 149 00c6 2500      		.word	37
+ 150 00c8 2600      		.word	38
+ 151 00ca 0100      		.word	1
+ 152 00cc 0100      		.word	1
+ 153 00ce 4900      		.word	73
+ 154 00d0 AD00      		.word	173
+ 155 00d2 AE00      		.word	174
+ 156 00d4 0100      		.word	1
+ 157 00d6 0100      		.word	1
+ 158 00d8 0100      		.word	1
+ 159 00da 0100      		.word	1
+ 160 00dc 0100      		.word	1
+ 161 00de 0100      		.word	1
+ 162 00e0 0100      		.word	1
+ 163 00e2 2100      		.word	33
+ 164 00e4 2200      		.word	34
+ 165 00e6 2300      		.word	35
+ 166 00e8 0100      		.word	1
+ 167 00ea 0100      		.word	1
+ 168 00ec 0000      		.word	0
+ 169 00ee 0100      		.word	1
+ 170 00f0 AF00      		.word	175
+ 171 00f2 E100      		.word	225
+ 172 00f4 0100      		.word	1
+ 173 00f6 0100      		.word	1
+ 174 00f8 0100      		.word	1
+ 175 00fa 0100      		.word	1
+ 176 00fc 0100      		.word	1
+ 177 00fe 0100      		.word	1
+ 178 0100 1E00      		.word	30
+ 179 0102 1F00      		.word	31
+ 180 0104 2000      		.word	32
+ 181 0106 0100      		.word	1
+ 182 0108 0000      		.word	0
+ 183 010a E500      		.word	229
+ 184 010c A900      		.word	169
+ 185 010e 4800      		.word	72
+ 186 0110 E400      		.word	228
+ 187 0112 6500      		.word	101
+ 188 0114 E600      		.word	230
+ 189 0116 0000      		.word	0
+ 190 0118 0000      		.word	0
+ 191 011a 0000      		.word	0
+ 192 011c 2C00      		.word	44
+ 193 011e 0000      		.word	0
+ 194 0120 0000      		.word	0
+ 195 0122 0000      		.word	0
+ 196 0124 3100      		.word	49
+ 197 0126 A800      		.word	168
+ 198 0128 AC00      		.word	172
+ 199 012a AA00      		.word	170
+ 200 012c AB00      		.word	171
+ 201               		.comm	keymap_config,1,1
+ 202               		.text
+ 203               	.Letext0:
+ 204               		.file 2 "/usr/lib/avr/include/stdint.h"
+ 205               		.file 3 "../../common/keycode.h"
+ 206               		.file 4 "../../common/action_code.h"
+ 207               		.file 5 "../../common/keymap.h"
+ 208               		.file 6 "../../protocol/lufa/LUFA-120730/LUFA/Drivers/USB/Core/USBTask.h"
+ 209               		.file 7 "keymap_jack.c"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 keymap_jack.c
+     /tmp/ccYhZBMt.s:2      *ABS*:000000000000003e __SP_H__
+     /tmp/ccYhZBMt.s:3      *ABS*:000000000000003d __SP_L__
+     /tmp/ccYhZBMt.s:4      *ABS*:000000000000003f __SREG__
+     /tmp/ccYhZBMt.s:5      *ABS*:0000000000000000 __tmp_reg__
+     /tmp/ccYhZBMt.s:6      *ABS*:0000000000000001 __zero_reg__
+     /tmp/ccYhZBMt.s:13     .text.matrix_power_up:0000000000000000 matrix_power_up
+     /tmp/ccYhZBMt.s:29     .text.matrix_power_down:0000000000000000 matrix_power_down
+     /tmp/ccYhZBMt.s:45     .progmem.data:0000000000000000 fn_actions
+     /tmp/ccYhZBMt.s:50     .progmem.data:0000000000000002 keymaps
+                            *COM*:0000000000000001 keymap_config
+
+UNDEFINED SYMBOLS
+__do_clear_bss

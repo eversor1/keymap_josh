@@ -1,0 +1,1712 @@
+   1               		.file	"matrix.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               		.section	.text.unselect_rows,"ax",@progbits
+  12               	unselect_rows:
+  13               	.LFB23:
+  14               		.file 1 "matrix.c"
+   1:matrix.c      **** /*
+   2:matrix.c      **** Copyright 2012 Jun Wako <wakojun@gmail.com>
+   3:matrix.c      **** 
+   4:matrix.c      **** This program is free software: you can redistribute it and/or modify
+   5:matrix.c      **** it under the terms of the GNU General Public License as published by
+   6:matrix.c      **** the Free Software Foundation, either version 2 of the License, or
+   7:matrix.c      **** (at your option) any later version.
+   8:matrix.c      **** 
+   9:matrix.c      **** This program is distributed in the hope that it will be useful,
+  10:matrix.c      **** but WITHOUT ANY WARRANTY; without even the implied warranty of
+  11:matrix.c      **** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  12:matrix.c      **** GNU General Public License for more details.
+  13:matrix.c      **** 
+  14:matrix.c      **** You should have received a copy of the GNU General Public License
+  15:matrix.c      **** along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  16:matrix.c      **** */
+  17:matrix.c      **** 
+  18:matrix.c      **** /*
+  19:matrix.c      ****  * scan matrix
+  20:matrix.c      ****  */
+  21:matrix.c      **** #include <stdint.h>
+  22:matrix.c      **** #include <stdbool.h>
+  23:matrix.c      **** #include <avr/io.h>
+  24:matrix.c      **** #include <util/delay.h>
+  25:matrix.c      **** #include "action_layer.h"
+  26:matrix.c      **** #include "print.h"
+  27:matrix.c      **** #include "debug.h"
+  28:matrix.c      **** #include "util.h"
+  29:matrix.c      **** #include "matrix.h"
+  30:matrix.c      **** 
+  31:matrix.c      **** 
+  32:matrix.c      **** #ifndef DEBOUNCE
+  33:matrix.c      **** #   define DEBOUNCE	10
+  34:matrix.c      **** #endif
+  35:matrix.c      **** static uint8_t debouncing = DEBOUNCE;
+  36:matrix.c      **** 
+  37:matrix.c      **** /* matrix state(1:on, 0:off) */
+  38:matrix.c      **** static matrix_row_t matrix[MATRIX_ROWS];
+  39:matrix.c      **** static matrix_row_t matrix_debouncing[MATRIX_ROWS];
+  40:matrix.c      **** 
+  41:matrix.c      **** static matrix_row_t read_cols(void);
+  42:matrix.c      **** static void init_cols(void);
+  43:matrix.c      **** static void unselect_rows(void);
+  44:matrix.c      **** static void select_row(uint8_t row);
+  45:matrix.c      **** 
+  46:matrix.c      **** 
+  47:matrix.c      **** inline
+  48:matrix.c      **** uint8_t matrix_rows(void)
+  49:matrix.c      **** {
+  50:matrix.c      ****     return MATRIX_ROWS;
+  51:matrix.c      **** }
+  52:matrix.c      **** 
+  53:matrix.c      **** inline
+  54:matrix.c      **** uint8_t matrix_cols(void)
+  55:matrix.c      **** {
+  56:matrix.c      ****     return MATRIX_COLS;
+  57:matrix.c      **** }
+  58:matrix.c      **** 
+  59:matrix.c      **** void matrix_init(void)
+  60:matrix.c      **** {
+  61:matrix.c      ****     // initialize row and col
+  62:matrix.c      ****     unselect_rows();
+  63:matrix.c      ****     init_cols();
+  64:matrix.c      **** 
+  65:matrix.c      ****     // initialize matrix state: all keys off
+  66:matrix.c      ****     for (uint8_t i=0; i < MATRIX_ROWS; i++) {
+  67:matrix.c      ****         matrix[i] = 0;
+  68:matrix.c      ****         matrix_debouncing[i] = 0;
+  69:matrix.c      ****     }
+  70:matrix.c      **** }
+  71:matrix.c      **** 
+  72:matrix.c      **** uint8_t matrix_scan(void)
+  73:matrix.c      **** {
+  74:matrix.c      ****     for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+  75:matrix.c      ****         select_row(i);
+  76:matrix.c      ****         _delay_us(30);  // without this wait read unstable value.
+  77:matrix.c      ****         matrix_row_t cols = read_cols();
+  78:matrix.c      ****         if (matrix_debouncing[i] != cols) {
+  79:matrix.c      ****             matrix_debouncing[i] = cols;
+  80:matrix.c      ****             if (debouncing) {
+  81:matrix.c      ****                 debug("bounce!: "); debug_hex(debouncing); debug("\n");
+  82:matrix.c      ****             }
+  83:matrix.c      ****             debouncing = DEBOUNCE;
+  84:matrix.c      ****         }
+  85:matrix.c      ****         unselect_rows();
+  86:matrix.c      ****     }
+  87:matrix.c      **** 
+  88:matrix.c      ****     if (debouncing) {
+  89:matrix.c      ****         if (--debouncing) {
+  90:matrix.c      ****             _delay_ms(1);
+  91:matrix.c      ****         } else {
+  92:matrix.c      ****             for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+  93:matrix.c      ****                 matrix[i] = matrix_debouncing[i];
+  94:matrix.c      ****             }
+  95:matrix.c      ****         }
+  96:matrix.c      ****     }
+  97:matrix.c      **** 
+  98:matrix.c      ****     uint8_t layer = biton32(layer_state);
+  99:matrix.c      ****     switch (layer) {
+ 100:matrix.c      ****         case 1:
+ 101:matrix.c      ****         case 2:
+ 102:matrix.c      ****             DDRC |= (1<<7);
+ 103:matrix.c      ****             PORTC |= (1<<7);
+ 104:matrix.c      ****             break;
+ 105:matrix.c      ****         case 0:
+ 106:matrix.c      ****             DDRC &= ~(1<<7);
+ 107:matrix.c      ****             PORTC &= ~(1<<7);
+ 108:matrix.c      ****             break;
+ 109:matrix.c      ****     }
+ 110:matrix.c      **** 
+ 111:matrix.c      ****     return 1;
+ 112:matrix.c      **** }
+ 113:matrix.c      **** 
+ 114:matrix.c      **** bool matrix_is_modified(void)
+ 115:matrix.c      **** {
+ 116:matrix.c      ****     if (debouncing) return false;
+ 117:matrix.c      ****     return true;
+ 118:matrix.c      **** }
+ 119:matrix.c      **** 
+ 120:matrix.c      **** inline
+ 121:matrix.c      **** bool matrix_is_on(uint8_t row, uint8_t col)
+ 122:matrix.c      **** {
+ 123:matrix.c      ****     return (matrix[row] & ((matrix_row_t)1<<col));
+ 124:matrix.c      **** }
+ 125:matrix.c      **** 
+ 126:matrix.c      **** inline
+ 127:matrix.c      **** matrix_row_t matrix_get_row(uint8_t row)
+ 128:matrix.c      **** {
+ 129:matrix.c      ****     return matrix[row];
+ 130:matrix.c      **** }
+ 131:matrix.c      **** 
+ 132:matrix.c      **** void matrix_print(void)
+ 133:matrix.c      **** {
+ 134:matrix.c      ****     print("\nr/c 0123456789ABCDEF\n");
+ 135:matrix.c      ****     for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+ 136:matrix.c      ****         phex(row); print(": ");
+ 137:matrix.c      ****         pbin_reverse16(matrix_get_row(row));
+ 138:matrix.c      ****         print("\n");
+ 139:matrix.c      ****     }
+ 140:matrix.c      **** }
+ 141:matrix.c      **** 
+ 142:matrix.c      **** uint8_t matrix_key_count(void)
+ 143:matrix.c      **** {
+ 144:matrix.c      ****     uint8_t count = 0;
+ 145:matrix.c      ****     for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+ 146:matrix.c      ****         count += bitpop16(matrix[i]);
+ 147:matrix.c      ****     }
+ 148:matrix.c      ****     return count;
+ 149:matrix.c      **** }
+ 150:matrix.c      **** 
+ 151:matrix.c      **** /* Column pin configuration
+ 152:matrix.c      ****  * col: 0  1  2  3  4  5  6  7  8  9  10 11
+ 153:matrix.c      ****  * pin: F0 F1 F4 F5 F6 F7 B6 B5 B4 D7 D5 D4
+ 154:matrix.c      ****  */
+ 155:matrix.c      **** 
+ 156:matrix.c      **** static void init_cols(void)
+ 157:matrix.c      **** {
+ 158:matrix.c      ****   // Input with pull-up(DDR:0, PORT:1)
+ 159:matrix.c      ****     DDRF  &= ~(1<<7);
+ 160:matrix.c      ****     PORTF |=  (1<<7);
+ 161:matrix.c      ****     DDRB  &= ~(1<<0 | 1<<7 | 1<<6 | 1<<5 | 1<<4 | 1<<3 | 1<<1);
+ 162:matrix.c      ****     PORTB |=  (1<<0 | 1<<7 | 1<<6 | 1<<5 | 1<<4 | 1<<3 | 1<<1);
+ 163:matrix.c      ****     DDRD  &= ~(1<<7 | 1<<3 | 1<<2 | 1<<1 | 1<<0 );
+ 164:matrix.c      ****     PORTD |=  (1<<7 | 1<<4 | 1<<3 | 1<<2 | 1<<1 | 1<<0 );
+ 165:matrix.c      ****     DDRC  &= ~(1<<6);
+ 166:matrix.c      ****     PORTC |=  (1<<6);
+ 167:matrix.c      **** 
+ 168:matrix.c      **** }
+ 169:matrix.c      **** 
+ 170:matrix.c      **** static matrix_row_t read_cols(void)
+ 171:matrix.c      **** {
+ 172:matrix.c      ****     return (PINF&(1<<7) ? 0 : (1<<14)) |
+ 173:matrix.c      ****            (PINB&(1<<6) ? 0 : (1<<13)) |
+ 174:matrix.c      ****            (PINB&(1<<5) ? 0 : (1<<12)) |
+ 175:matrix.c      ****            (PINB&(1<<4) ? 0 : (1<<11)) |
+ 176:matrix.c      ****            (PIND&(1<<7) ? 0 : (1<<10)) |
+ 177:matrix.c      ****            (PIND&(1<<4) ? 0 : (1<<9)) |
+ 178:matrix.c      ****            (PINC&(1<<6) ? 0 : (1<<8)) |
+ 179:matrix.c      ****            (PIND&(1<<3) ? 0 : (1<<7)) |
+ 180:matrix.c      ****            (PIND&(1<<2) ? 0 : (1<<6)) |
+ 181:matrix.c      ****            (PIND&(1<<1) ? 0 : (1<<5)) |
+ 182:matrix.c      ****            (PIND&(1<<0) ? 0 : (1<<4)) |
+ 183:matrix.c      ****            (PINB&(1<<7) ? 0 : (1<<3)) |
+ 184:matrix.c      ****            (PINB&(1<<3) ? 0 : (1<<2)) |
+ 185:matrix.c      ****            (PINB&(1<<0) ? 0 : (1<<1)) |
+ 186:matrix.c      ****            (PINB&(1<<1) ? 0 : (1<<0));
+ 187:matrix.c      **** }
+ 188:matrix.c      **** 
+ 189:matrix.c      **** /* Row pin configuration
+ 190:matrix.c      ****  * row: 0  1  2  3
+ 191:matrix.c      ****  * pin: B0 B1 B2 B3
+ 192:matrix.c      ****  */
+ 193:matrix.c      **** static void unselect_rows(void)
+ 194:matrix.c      **** {
+  15               		.loc 1 194 0
+  16               		.cfi_startproc
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+ 195:matrix.c      ****     // Hi-Z(DDR:0, PORT:0) to unselect
+ 196:matrix.c      ****     //DDRB  &= ~0b01110000;
+ 197:matrix.c      ****     //PORTB &= ~0b01110000;
+ 198:matrix.c      ****     //DDRD  &= ~0b10000000;
+ 199:matrix.c      ****     //PORTD &= ~0b10000000;
+ 200:matrix.c      ****     DDRF &= ~(1<<6 | 1<<5 | 1<<4 | 1<<1 | 1<<0);
+  21               		.loc 1 200 0
+  22 0000 80B3      		in r24,0x10
+  23 0002 8C78      		andi r24,lo8(-116)
+  24 0004 80BB      		out 0x10,r24
+ 201:matrix.c      ****     PORTF |= (1<<6 | 1<<5 | 1<<4 | 1<<1 | 1<<0);
+  25               		.loc 1 201 0
+  26 0006 81B3      		in r24,0x11
+  27 0008 8367      		ori r24,lo8(115)
+  28 000a 81BB      		out 0x11,r24
+  29 000c 0895      		ret
+  30               		.cfi_endproc
+  31               	.LFE23:
+  33               		.section	.text.matrix_power_up,"ax",@progbits
+  34               		.weak	matrix_power_up
+  36               	matrix_power_up:
+  37               	.LFB9:
+  38               		.file 2 "../../common/keyboard.h"
+   1:../../common/keyboard.h **** /*
+   2:../../common/keyboard.h **** Copyright 2011,2012,2013 Jun Wako <wakojun@gmail.com>
+   3:../../common/keyboard.h **** 
+   4:../../common/keyboard.h **** This program is free software: you can redistribute it and/or modify
+   5:../../common/keyboard.h **** it under the terms of the GNU General Public License as published by
+   6:../../common/keyboard.h **** the Free Software Foundation, either version 2 of the License, or
+   7:../../common/keyboard.h **** (at your option) any later version.
+   8:../../common/keyboard.h **** 
+   9:../../common/keyboard.h **** This program is distributed in the hope that it will be useful,
+  10:../../common/keyboard.h **** but WITHOUT ANY WARRANTY; without even the implied warranty of
+  11:../../common/keyboard.h **** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  12:../../common/keyboard.h **** GNU General Public License for more details.
+  13:../../common/keyboard.h **** 
+  14:../../common/keyboard.h **** You should have received a copy of the GNU General Public License
+  15:../../common/keyboard.h **** along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  16:../../common/keyboard.h **** */
+  17:../../common/keyboard.h **** 
+  18:../../common/keyboard.h **** #ifndef KEYBOARD_H
+  19:../../common/keyboard.h **** #define KEYBOARD_H
+  20:../../common/keyboard.h **** 
+  21:../../common/keyboard.h **** #include <stdbool.h>
+  22:../../common/keyboard.h **** #include <stdint.h>
+  23:../../common/keyboard.h **** 
+  24:../../common/keyboard.h **** 
+  25:../../common/keyboard.h **** #ifdef __cplusplus
+  26:../../common/keyboard.h **** extern "C" {
+  27:../../common/keyboard.h **** #endif
+  28:../../common/keyboard.h **** 
+  29:../../common/keyboard.h **** /* key matrix position */
+  30:../../common/keyboard.h **** typedef struct {
+  31:../../common/keyboard.h ****     uint8_t col;
+  32:../../common/keyboard.h ****     uint8_t row;
+  33:../../common/keyboard.h **** } keypos_t;
+  34:../../common/keyboard.h **** 
+  35:../../common/keyboard.h **** /* key event */
+  36:../../common/keyboard.h **** typedef struct {
+  37:../../common/keyboard.h ****     keypos_t key;
+  38:../../common/keyboard.h ****     bool     pressed;
+  39:../../common/keyboard.h ****     uint16_t time;
+  40:../../common/keyboard.h **** } keyevent_t;
+  41:../../common/keyboard.h **** 
+  42:../../common/keyboard.h **** /* equivalent test of keypos_t */
+  43:../../common/keyboard.h **** #define KEYEQ(keya, keyb)       ((keya).row == (keyb).row && (keya).col == (keyb).col)
+  44:../../common/keyboard.h **** 
+  45:../../common/keyboard.h **** /* Rules for No Event:
+  46:../../common/keyboard.h ****  * 1) (time == 0) to handle (keyevent_t){} as empty event
+  47:../../common/keyboard.h ****  * 2) Matrix(255, 255) to make TICK event available
+  48:../../common/keyboard.h ****  */
+  49:../../common/keyboard.h **** static inline bool IS_NOEVENT(keyevent_t event) { return event.time == 0 || (event.key.row == 255 &
+  50:../../common/keyboard.h **** static inline bool IS_PRESSED(keyevent_t event) { return (!IS_NOEVENT(event) && event.pressed); }
+  51:../../common/keyboard.h **** static inline bool IS_RELEASED(keyevent_t event) { return (!IS_NOEVENT(event) && !event.pressed); }
+  52:../../common/keyboard.h **** 
+  53:../../common/keyboard.h **** /* Tick event */
+  54:../../common/keyboard.h **** #define TICK                    (keyevent_t){           \
+  55:../../common/keyboard.h ****     .key = (keypos_t){ .row = 255, .col = 255 },           \
+  56:../../common/keyboard.h ****     .pressed = false,                                   \
+  57:../../common/keyboard.h ****     .time = (timer_read() | 1)                          \
+  58:../../common/keyboard.h **** }
+  59:../../common/keyboard.h **** 
+  60:../../common/keyboard.h **** 
+  61:../../common/keyboard.h **** void keyboard_init(void);
+  62:../../common/keyboard.h **** void keyboard_task(void);
+  63:../../common/keyboard.h **** void keyboard_set_leds(uint8_t leds);
+  64:../../common/keyboard.h **** 
+  65:../../common/keyboard.h **** __attribute__ ((weak)) void matrix_power_up(void) {}
+  39               		.loc 2 65 0
+  40               		.cfi_startproc
+  41               	/* prologue: function */
+  42               	/* frame size = 0 */
+  43               	/* stack size = 0 */
+  44               	.L__stack_usage = 0
+  45 0000 0895      		ret
+  46               		.cfi_endproc
+  47               	.LFE9:
+  49               		.section	.text.matrix_power_down,"ax",@progbits
+  50               		.weak	matrix_power_down
+  52               	matrix_power_down:
+  53               	.LFB10:
+  66:../../common/keyboard.h **** __attribute__ ((weak)) void matrix_power_down(void) {}
+  54               		.loc 2 66 0
+  55               		.cfi_startproc
+  56               	/* prologue: function */
+  57               	/* frame size = 0 */
+  58               	/* stack size = 0 */
+  59               	.L__stack_usage = 0
+  60 0000 0895      		ret
+  61               		.cfi_endproc
+  62               	.LFE10:
+  64               		.section	.text.matrix_rows,"ax",@progbits
+  65               	.global	matrix_rows
+  67               	matrix_rows:
+  68               	.LFB12:
+  49:matrix.c      **** {
+  69               		.loc 1 49 0
+  70               		.cfi_startproc
+  71               	/* prologue: function */
+  72               	/* frame size = 0 */
+  73               	/* stack size = 0 */
+  74               	.L__stack_usage = 0
+  51:matrix.c      **** }
+  75               		.loc 1 51 0
+  76 0000 85E0      		ldi r24,lo8(5)
+  77 0002 0895      		ret
+  78               		.cfi_endproc
+  79               	.LFE12:
+  81               		.section	.text.matrix_cols,"ax",@progbits
+  82               	.global	matrix_cols
+  84               	matrix_cols:
+  85               	.LFB13:
+  55:matrix.c      **** {
+  86               		.loc 1 55 0
+  87               		.cfi_startproc
+  88               	/* prologue: function */
+  89               	/* frame size = 0 */
+  90               	/* stack size = 0 */
+  91               	.L__stack_usage = 0
+  57:matrix.c      **** }
+  92               		.loc 1 57 0
+  93 0000 8FE0      		ldi r24,lo8(15)
+  94 0002 0895      		ret
+  95               		.cfi_endproc
+  96               	.LFE13:
+  98               		.section	.text.matrix_init,"ax",@progbits
+  99               	.global	matrix_init
+ 101               	matrix_init:
+ 102               	.LFB14:
+  60:matrix.c      **** {
+ 103               		.loc 1 60 0
+ 104               		.cfi_startproc
+ 105               	/* prologue: function */
+ 106               	/* frame size = 0 */
+ 107               	/* stack size = 0 */
+ 108               	.L__stack_usage = 0
+  62:matrix.c      ****     unselect_rows();
+ 109               		.loc 1 62 0
+ 110 0000 0E94 0000 		call unselect_rows
+ 111               	.LVL0:
+ 112               	.LBB23:
+ 113               	.LBB24:
+ 159:matrix.c      ****     DDRF  &= ~(1<<7);
+ 114               		.loc 1 159 0
+ 115 0004 8798      		cbi 0x10,7
+ 160:matrix.c      ****     PORTF |=  (1<<7);
+ 116               		.loc 1 160 0
+ 117 0006 8F9A      		sbi 0x11,7
+ 161:matrix.c      ****     DDRB  &= ~(1<<0 | 1<<7 | 1<<6 | 1<<5 | 1<<4 | 1<<3 | 1<<1);
+ 118               		.loc 1 161 0
+ 119 0008 84B1      		in r24,0x4
+ 120 000a 8470      		andi r24,lo8(4)
+ 121 000c 84B9      		out 0x4,r24
+ 162:matrix.c      ****     PORTB |=  (1<<0 | 1<<7 | 1<<6 | 1<<5 | 1<<4 | 1<<3 | 1<<1);
+ 122               		.loc 1 162 0
+ 123 000e 85B1      		in r24,0x5
+ 124 0010 8B6F      		ori r24,lo8(-5)
+ 125 0012 85B9      		out 0x5,r24
+ 163:matrix.c      ****     DDRD  &= ~(1<<7 | 1<<3 | 1<<2 | 1<<1 | 1<<0 );
+ 126               		.loc 1 163 0
+ 127 0014 8AB1      		in r24,0xa
+ 128 0016 8077      		andi r24,lo8(112)
+ 129 0018 8AB9      		out 0xa,r24
+ 164:matrix.c      ****     PORTD |=  (1<<7 | 1<<4 | 1<<3 | 1<<2 | 1<<1 | 1<<0 );
+ 130               		.loc 1 164 0
+ 131 001a 8BB1      		in r24,0xb
+ 132 001c 8F69      		ori r24,lo8(-97)
+ 133 001e 8BB9      		out 0xb,r24
+ 165:matrix.c      ****     DDRC  &= ~(1<<6);
+ 134               		.loc 1 165 0
+ 135 0020 3E98      		cbi 0x7,6
+ 166:matrix.c      ****     PORTC |=  (1<<6);
+ 136               		.loc 1 166 0
+ 137 0022 469A      		sbi 0x8,6
+ 138               	.LVL1:
+ 139 0024 E0E0      		ldi r30,lo8(matrix)
+ 140 0026 F0E0      		ldi r31,hi8(matrix)
+ 141 0028 A0E0      		ldi r26,lo8(matrix_debouncing)
+ 142 002a B0E0      		ldi r27,hi8(matrix_debouncing)
+ 143               	.LVL2:
+ 144               	.L8:
+ 145               	.LBE24:
+ 146               	.LBE23:
+ 147               	.LBB25:
+  67:matrix.c      ****         matrix[i] = 0;
+ 148               		.loc 1 67 0 discriminator 2
+ 149 002c 1192      		st Z+,__zero_reg__
+ 150 002e 1192      		st Z+,__zero_reg__
+  68:matrix.c      ****         matrix_debouncing[i] = 0;
+ 151               		.loc 1 68 0 discriminator 2
+ 152 0030 1D92      		st X+,__zero_reg__
+ 153 0032 1D92      		st X+,__zero_reg__
+  66:matrix.c      ****     for (uint8_t i=0; i < MATRIX_ROWS; i++) {
+ 154               		.loc 1 66 0 discriminator 2
+ 155 0034 80E0      		ldi r24,hi8(matrix+10)
+ 156 0036 E030      		cpi r30,lo8(matrix+10)
+ 157 0038 F807      		cpc r31,r24
+ 158 003a 01F4      		brne .L8
+ 159               	/* epilogue start */
+ 160               	.LBE25:
+  70:matrix.c      **** }
+ 161               		.loc 1 70 0
+ 162 003c 0895      		ret
+ 163               		.cfi_endproc
+ 164               	.LFE14:
+ 166               		.section	.text.matrix_scan,"ax",@progbits
+ 167               	.global	matrix_scan
+ 169               	matrix_scan:
+ 170               	.LFB15:
+  73:matrix.c      **** {
+ 171               		.loc 1 73 0
+ 172               		.cfi_startproc
+ 173 0000 2F92      		push r2
+ 174               	.LCFI0:
+ 175               		.cfi_def_cfa_offset 3
+ 176               		.cfi_offset 2, -2
+ 177 0002 3F92      		push r3
+ 178               	.LCFI1:
+ 179               		.cfi_def_cfa_offset 4
+ 180               		.cfi_offset 3, -3
+ 181 0004 4F92      		push r4
+ 182               	.LCFI2:
+ 183               		.cfi_def_cfa_offset 5
+ 184               		.cfi_offset 4, -4
+ 185 0006 5F92      		push r5
+ 186               	.LCFI3:
+ 187               		.cfi_def_cfa_offset 6
+ 188               		.cfi_offset 5, -5
+ 189 0008 6F92      		push r6
+ 190               	.LCFI4:
+ 191               		.cfi_def_cfa_offset 7
+ 192               		.cfi_offset 6, -6
+ 193 000a 7F92      		push r7
+ 194               	.LCFI5:
+ 195               		.cfi_def_cfa_offset 8
+ 196               		.cfi_offset 7, -7
+ 197 000c 8F92      		push r8
+ 198               	.LCFI6:
+ 199               		.cfi_def_cfa_offset 9
+ 200               		.cfi_offset 8, -8
+ 201 000e 9F92      		push r9
+ 202               	.LCFI7:
+ 203               		.cfi_def_cfa_offset 10
+ 204               		.cfi_offset 9, -9
+ 205 0010 AF92      		push r10
+ 206               	.LCFI8:
+ 207               		.cfi_def_cfa_offset 11
+ 208               		.cfi_offset 10, -10
+ 209 0012 BF92      		push r11
+ 210               	.LCFI9:
+ 211               		.cfi_def_cfa_offset 12
+ 212               		.cfi_offset 11, -11
+ 213 0014 CF92      		push r12
+ 214               	.LCFI10:
+ 215               		.cfi_def_cfa_offset 13
+ 216               		.cfi_offset 12, -12
+ 217 0016 DF92      		push r13
+ 218               	.LCFI11:
+ 219               		.cfi_def_cfa_offset 14
+ 220               		.cfi_offset 13, -13
+ 221 0018 EF92      		push r14
+ 222               	.LCFI12:
+ 223               		.cfi_def_cfa_offset 15
+ 224               		.cfi_offset 14, -14
+ 225 001a FF92      		push r15
+ 226               	.LCFI13:
+ 227               		.cfi_def_cfa_offset 16
+ 228               		.cfi_offset 15, -15
+ 229 001c 0F93      		push r16
+ 230               	.LCFI14:
+ 231               		.cfi_def_cfa_offset 17
+ 232               		.cfi_offset 16, -16
+ 233 001e 1F93      		push r17
+ 234               	.LCFI15:
+ 235               		.cfi_def_cfa_offset 18
+ 236               		.cfi_offset 17, -17
+ 237 0020 CF93      		push r28
+ 238               	.LCFI16:
+ 239               		.cfi_def_cfa_offset 19
+ 240               		.cfi_offset 28, -18
+ 241 0022 DF93      		push r29
+ 242               	.LCFI17:
+ 243               		.cfi_def_cfa_offset 20
+ 244               		.cfi_offset 29, -19
+ 245 0024 CDB7      		in r28,__SP_L__
+ 246 0026 DEB7      		in r29,__SP_H__
+ 247               	.LCFI18:
+ 248               		.cfi_def_cfa_register 28
+ 249 0028 2A97      		sbiw r28,10
+ 250               	.LCFI19:
+ 251               		.cfi_def_cfa_offset 30
+ 252 002a 0FB6      		in __tmp_reg__,__SREG__
+ 253 002c F894      		cli
+ 254 002e DEBF      		out __SP_H__,r29
+ 255 0030 0FBE      		out __SREG__,__tmp_reg__
+ 256 0032 CDBF      		out __SP_L__,r28
+ 257               	/* prologue: function */
+ 258               	/* frame size = 10 */
+ 259               	/* stack size = 28 */
+ 260               	.L__stack_usage = 28
+ 261               	.LVL3:
+  73:matrix.c      **** {
+ 262               		.loc 1 73 0
+ 263 0034 00E0      		ldi r16,lo8(matrix_debouncing)
+ 264 0036 10E0      		ldi r17,hi8(matrix_debouncing)
+ 265               	.LBB40:
+  74:matrix.c      ****     for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+ 266               		.loc 1 74 0
+ 267 0038 912C      		mov r9,__zero_reg__
+ 268               	.LVL4:
+ 269               	.L39:
+ 270               	.LBB41:
+ 271               	.LBB42:
+ 272               	.LBB43:
+ 202:matrix.c      **** 
+ 203:matrix.c      **** }
+ 204:matrix.c      **** 
+ 205:matrix.c      **** static void select_row(uint8_t row)
+ 206:matrix.c      **** {
+ 207:matrix.c      ****     switch (row) {
+ 273               		.loc 1 207 0
+ 274 003a 22E0      		ldi r18,lo8(2)
+ 275 003c 9216      		cp r9,r18
+ 276 003e 01F0      		breq .L12
+ 277 0040 2915      		cp r18,r9
+ 278 0042 00F0      		brlo .L13
+ 279 0044 31E0      		ldi r19,lo8(1)
+ 280 0046 9316      		cp r9,r19
+ 281 0048 01F0      		breq .L14
+ 282 004a 00C0      		rjmp .L11
+ 283               	.L13:
+ 284 004c 43E0      		ldi r20,lo8(3)
+ 285 004e 9416      		cp r9,r20
+ 286 0050 01F0      		breq .L15
+ 287 0052 54E0      		ldi r21,lo8(4)
+ 288 0054 9516      		cp r9,r21
+ 289 0056 01F0      		breq .L16
+ 290               	.L11:
+ 208:matrix.c      ****         case 0:
+ 209:matrix.c      ****             DDRF  |= (1<<0);
+ 291               		.loc 1 209 0
+ 292 0058 809A      		sbi 0x10,0
+ 210:matrix.c      ****             PORTF &= ~(1<<0);
+ 293               		.loc 1 210 0
+ 294 005a 8898      		cbi 0x11,0
+ 295 005c 00C0      		rjmp .L17
+ 296               	.L14:
+ 211:matrix.c      ****             break;
+ 212:matrix.c      ****         case 1:
+ 213:matrix.c      ****             DDRF  |= (1<<1);
+ 297               		.loc 1 213 0
+ 298 005e 819A      		sbi 0x10,1
+ 214:matrix.c      ****             PORTF &= ~(1<<1);
+ 299               		.loc 1 214 0
+ 300 0060 8998      		cbi 0x11,1
+ 301 0062 00C0      		rjmp .L17
+ 302               	.L12:
+ 215:matrix.c      ****             break;
+ 216:matrix.c      ****         case 2:
+ 217:matrix.c      ****             DDRF  |= (1<<4);
+ 303               		.loc 1 217 0
+ 304 0064 849A      		sbi 0x10,4
+ 218:matrix.c      ****             PORTF &= ~(1<<4);
+ 305               		.loc 1 218 0
+ 306 0066 8C98      		cbi 0x11,4
+ 307 0068 00C0      		rjmp .L17
+ 308               	.L15:
+ 219:matrix.c      ****             break;
+ 220:matrix.c      ****         case 3:
+ 221:matrix.c      ****             DDRF  |= (1<<5);
+ 309               		.loc 1 221 0
+ 310 006a 859A      		sbi 0x10,5
+ 222:matrix.c      ****             PORTF &= ~(1<<5);
+ 311               		.loc 1 222 0
+ 312 006c 8D98      		cbi 0x11,5
+ 313 006e 00C0      		rjmp .L17
+ 314               	.L16:
+ 223:matrix.c      ****             break;
+ 224:matrix.c      **** 	case 4:
+ 225:matrix.c      **** 	    DDRF  |= (1<<6);
+ 315               		.loc 1 225 0
+ 316 0070 869A      		sbi 0x10,6
+ 226:matrix.c      **** 	    PORTF &= ~(1<<6);
+ 317               		.loc 1 226 0
+ 318 0072 8E98      		cbi 0x11,6
+ 319               	.L17:
+ 320               	.LVL5:
+ 321               	.LBE43:
+ 322               	.LBE42:
+ 323               	.LBB44:
+ 324               	.LBB45:
+ 325               		.file 3 "/usr/lib/avr/include/util/delay.h"
+   1:/usr/lib/avr/include/util/delay.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/lib/avr/include/util/delay.h ****    Copyright (c) 2004,2005,2007 Joerg Wunsch
+   3:/usr/lib/avr/include/util/delay.h ****    Copyright (c) 2007  Florin-Viorel Petrov
+   4:/usr/lib/avr/include/util/delay.h ****    All rights reserved.
+   5:/usr/lib/avr/include/util/delay.h **** 
+   6:/usr/lib/avr/include/util/delay.h ****    Redistribution and use in source and binary forms, with or without
+   7:/usr/lib/avr/include/util/delay.h ****    modification, are permitted provided that the following conditions are met:
+   8:/usr/lib/avr/include/util/delay.h **** 
+   9:/usr/lib/avr/include/util/delay.h ****    * Redistributions of source code must retain the above copyright
+  10:/usr/lib/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer.
+  11:/usr/lib/avr/include/util/delay.h **** 
+  12:/usr/lib/avr/include/util/delay.h ****    * Redistributions in binary form must reproduce the above copyright
+  13:/usr/lib/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer in
+  14:/usr/lib/avr/include/util/delay.h ****      the documentation and/or other materials provided with the
+  15:/usr/lib/avr/include/util/delay.h ****      distribution.
+  16:/usr/lib/avr/include/util/delay.h **** 
+  17:/usr/lib/avr/include/util/delay.h ****    * Neither the name of the copyright holders nor the names of
+  18:/usr/lib/avr/include/util/delay.h ****      contributors may be used to endorse or promote products derived
+  19:/usr/lib/avr/include/util/delay.h ****      from this software without specific prior written permission.
+  20:/usr/lib/avr/include/util/delay.h **** 
+  21:/usr/lib/avr/include/util/delay.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  22:/usr/lib/avr/include/util/delay.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  23:/usr/lib/avr/include/util/delay.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  24:/usr/lib/avr/include/util/delay.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  25:/usr/lib/avr/include/util/delay.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  26:/usr/lib/avr/include/util/delay.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  27:/usr/lib/avr/include/util/delay.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  28:/usr/lib/avr/include/util/delay.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  29:/usr/lib/avr/include/util/delay.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  30:/usr/lib/avr/include/util/delay.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  31:/usr/lib/avr/include/util/delay.h ****   POSSIBILITY OF SUCH DAMAGE. */
+  32:/usr/lib/avr/include/util/delay.h **** 
+  33:/usr/lib/avr/include/util/delay.h **** /* $Id: delay.h.in 2251 2011-09-14 08:20:33Z joerg_wunsch $ */
+  34:/usr/lib/avr/include/util/delay.h **** 
+  35:/usr/lib/avr/include/util/delay.h **** #ifndef _UTIL_DELAY_H_
+  36:/usr/lib/avr/include/util/delay.h **** #define _UTIL_DELAY_H_ 1
+  37:/usr/lib/avr/include/util/delay.h **** 
+  38:/usr/lib/avr/include/util/delay.h **** #ifndef __HAS_DELAY_CYCLES
+  39:/usr/lib/avr/include/util/delay.h **** #define __HAS_DELAY_CYCLES 1
+  40:/usr/lib/avr/include/util/delay.h **** #endif
+  41:/usr/lib/avr/include/util/delay.h **** 
+  42:/usr/lib/avr/include/util/delay.h **** #include <inttypes.h>
+  43:/usr/lib/avr/include/util/delay.h **** #include <util/delay_basic.h>
+  44:/usr/lib/avr/include/util/delay.h **** #include <math.h>
+  45:/usr/lib/avr/include/util/delay.h **** 
+  46:/usr/lib/avr/include/util/delay.h **** /** \file */
+  47:/usr/lib/avr/include/util/delay.h **** /** \defgroup util_delay <util/delay.h>: Convenience functions for busy-wait delay loops
+  48:/usr/lib/avr/include/util/delay.h ****     \code
+  49:/usr/lib/avr/include/util/delay.h ****     #define F_CPU 1000000UL  // 1 MHz
+  50:/usr/lib/avr/include/util/delay.h ****     //#define F_CPU 14.7456E6
+  51:/usr/lib/avr/include/util/delay.h ****     #include <util/delay.h>
+  52:/usr/lib/avr/include/util/delay.h ****     \endcode
+  53:/usr/lib/avr/include/util/delay.h **** 
+  54:/usr/lib/avr/include/util/delay.h ****     \note As an alternative method, it is possible to pass the
+  55:/usr/lib/avr/include/util/delay.h ****     F_CPU macro down to the compiler from the Makefile.
+  56:/usr/lib/avr/include/util/delay.h ****     Obviously, in that case, no \c \#define statement should be
+  57:/usr/lib/avr/include/util/delay.h ****     used.
+  58:/usr/lib/avr/include/util/delay.h **** 
+  59:/usr/lib/avr/include/util/delay.h ****     The functions in this header file are wrappers around the basic
+  60:/usr/lib/avr/include/util/delay.h ****     busy-wait functions from <util/delay_basic.h>.  They are meant as
+  61:/usr/lib/avr/include/util/delay.h ****     convenience functions where actual time values can be specified
+  62:/usr/lib/avr/include/util/delay.h ****     rather than a number of cycles to wait for.  The idea behind is
+  63:/usr/lib/avr/include/util/delay.h ****     that compile-time constant expressions will be eliminated by
+  64:/usr/lib/avr/include/util/delay.h ****     compiler optimization so floating-point expressions can be used
+  65:/usr/lib/avr/include/util/delay.h ****     to calculate the number of delay cycles needed based on the CPU
+  66:/usr/lib/avr/include/util/delay.h ****     frequency passed by the macro F_CPU.
+  67:/usr/lib/avr/include/util/delay.h **** 
+  68:/usr/lib/avr/include/util/delay.h ****     \note In order for these functions to work as intended, compiler
+  69:/usr/lib/avr/include/util/delay.h ****     optimizations <em>must</em> be enabled, and the delay time
+  70:/usr/lib/avr/include/util/delay.h ****     <em>must</em> be an expression that is a known constant at
+  71:/usr/lib/avr/include/util/delay.h ****     compile-time.  If these requirements are not met, the resulting
+  72:/usr/lib/avr/include/util/delay.h ****     delay will be much longer (and basically unpredictable), and
+  73:/usr/lib/avr/include/util/delay.h ****     applications that otherwise do not use floating-point calculations
+  74:/usr/lib/avr/include/util/delay.h ****     will experience severe code bloat by the floating-point library
+  75:/usr/lib/avr/include/util/delay.h ****     routines linked into the application.
+  76:/usr/lib/avr/include/util/delay.h **** 
+  77:/usr/lib/avr/include/util/delay.h ****     The functions available allow the specification of microsecond, and
+  78:/usr/lib/avr/include/util/delay.h ****     millisecond delays directly, using the application-supplied macro
+  79:/usr/lib/avr/include/util/delay.h ****     F_CPU as the CPU clock frequency (in Hertz).
+  80:/usr/lib/avr/include/util/delay.h **** 
+  81:/usr/lib/avr/include/util/delay.h **** */
+  82:/usr/lib/avr/include/util/delay.h **** 
+  83:/usr/lib/avr/include/util/delay.h **** #if !defined(__DOXYGEN__)
+  84:/usr/lib/avr/include/util/delay.h **** static inline void _delay_us(double __us) __attribute__((always_inline));
+  85:/usr/lib/avr/include/util/delay.h **** static inline void _delay_ms(double __ms) __attribute__((always_inline));
+  86:/usr/lib/avr/include/util/delay.h **** #endif
+  87:/usr/lib/avr/include/util/delay.h **** 
+  88:/usr/lib/avr/include/util/delay.h **** #ifndef F_CPU
+  89:/usr/lib/avr/include/util/delay.h **** /* prevent compiler error by supplying a default */
+  90:/usr/lib/avr/include/util/delay.h **** # warning "F_CPU not defined for <util/delay.h>"
+  91:/usr/lib/avr/include/util/delay.h **** # define F_CPU 1000000UL
+  92:/usr/lib/avr/include/util/delay.h **** #endif
+  93:/usr/lib/avr/include/util/delay.h **** 
+  94:/usr/lib/avr/include/util/delay.h **** #ifndef __OPTIMIZE__
+  95:/usr/lib/avr/include/util/delay.h **** # warning "Compiler optimizations disabled; functions from <util/delay.h> won't work as designed"
+  96:/usr/lib/avr/include/util/delay.h **** #endif
+  97:/usr/lib/avr/include/util/delay.h **** 
+  98:/usr/lib/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+  99:/usr/lib/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 100:/usr/lib/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 101:/usr/lib/avr/include/util/delay.h **** #  include <math.h>
+ 102:/usr/lib/avr/include/util/delay.h **** #endif
+ 103:/usr/lib/avr/include/util/delay.h **** 
+ 104:/usr/lib/avr/include/util/delay.h **** /**
+ 105:/usr/lib/avr/include/util/delay.h ****    \ingroup util_delay
+ 106:/usr/lib/avr/include/util/delay.h **** 
+ 107:/usr/lib/avr/include/util/delay.h ****    Perform a delay of \c __ms milliseconds, using _delay_loop_2().
+ 108:/usr/lib/avr/include/util/delay.h **** 
+ 109:/usr/lib/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 110:/usr/lib/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 111:/usr/lib/avr/include/util/delay.h **** 
+ 112:/usr/lib/avr/include/util/delay.h ****    The maximal possible delay is 262.14 ms / F_CPU in MHz.
+ 113:/usr/lib/avr/include/util/delay.h **** 
+ 114:/usr/lib/avr/include/util/delay.h ****    When the user request delay which exceed the maximum possible one,
+ 115:/usr/lib/avr/include/util/delay.h ****    _delay_ms() provides a decreased resolution functionality. In this
+ 116:/usr/lib/avr/include/util/delay.h ****    mode _delay_ms() will work with a resolution of 1/10 ms, providing
+ 117:/usr/lib/avr/include/util/delay.h ****    delays up to 6.5535 seconds (independent from CPU frequency).  The
+ 118:/usr/lib/avr/include/util/delay.h ****    user will not be informed about decreased resolution.
+ 119:/usr/lib/avr/include/util/delay.h **** 
+ 120:/usr/lib/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles(unsigned long)
+ 121:/usr/lib/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 ms/ F_CPU in MHz. For
+ 122:/usr/lib/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflows results in
+ 123:/usr/lib/avr/include/util/delay.h ****    no delay i.e., 0ms.
+ 124:/usr/lib/avr/include/util/delay.h **** 
+ 125:/usr/lib/avr/include/util/delay.h ****    Conversion of __us into clock cycles may not always result in integer.
+ 126:/usr/lib/avr/include/util/delay.h ****    By default, the clock cycles rounded up to next integer. This ensures that
+ 127:/usr/lib/avr/include/util/delay.h ****    the user gets atleast __us microseconds of delay.
+ 128:/usr/lib/avr/include/util/delay.h **** 
+ 129:/usr/lib/avr/include/util/delay.h ****    Alternatively, user can define __DELAY_ROUND_DOWN__ and __DELAY_ROUND_CLOSEST__
+ 130:/usr/lib/avr/include/util/delay.h ****    to round down and round to closest integer.
+ 131:/usr/lib/avr/include/util/delay.h **** 
+ 132:/usr/lib/avr/include/util/delay.h ****    Note: The new implementation of _delay_ms(double __ms) with 
+ 133:/usr/lib/avr/include/util/delay.h ****     __builtin_avr_delay_cycles(unsigned long) support is not backward compatible. 
+ 134:/usr/lib/avr/include/util/delay.h ****    User can define __DELAY_BACKWARD_COMPATIBLE__ to get a backward compatible delay.
+ 135:/usr/lib/avr/include/util/delay.h ****    Also, the backward compatible
+ 136:/usr/lib/avr/include/util/delay.h ****    algorithm will be chosen if the code is compiled in a <em>freestanding
+ 137:/usr/lib/avr/include/util/delay.h ****    environment</em> (GCC option \c -ffreestanding), as the math functions
+ 138:/usr/lib/avr/include/util/delay.h ****    required for rounding are not available to the compiler then.
+ 139:/usr/lib/avr/include/util/delay.h **** 
+ 140:/usr/lib/avr/include/util/delay.h ****  */
+ 141:/usr/lib/avr/include/util/delay.h **** void
+ 142:/usr/lib/avr/include/util/delay.h **** _delay_ms(double __ms)
+ 143:/usr/lib/avr/include/util/delay.h **** {
+ 144:/usr/lib/avr/include/util/delay.h **** 	uint16_t __ticks;
+ 145:/usr/lib/avr/include/util/delay.h **** 	double __tmp ; 
+ 146:/usr/lib/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 147:/usr/lib/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 148:/usr/lib/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 149:/usr/lib/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 150:/usr/lib/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 151:/usr/lib/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e3) * __ms;
+ 152:/usr/lib/avr/include/util/delay.h **** 
+ 153:/usr/lib/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 154:/usr/lib/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 155:/usr/lib/avr/include/util/delay.h **** 
+ 156:/usr/lib/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 157:/usr/lib/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 158:/usr/lib/avr/include/util/delay.h **** 
+ 159:/usr/lib/avr/include/util/delay.h **** 	#else
+ 160:/usr/lib/avr/include/util/delay.h **** 		//round up by default
+ 161:/usr/lib/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 162:/usr/lib/avr/include/util/delay.h **** 	#endif
+ 163:/usr/lib/avr/include/util/delay.h **** 
+ 164:/usr/lib/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 165:/usr/lib/avr/include/util/delay.h **** 
+ 166:/usr/lib/avr/include/util/delay.h **** #else
+ 167:/usr/lib/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 4e3) * __ms;
+ 168:/usr/lib/avr/include/util/delay.h **** 	if (__tmp < 1.0)
+ 169:/usr/lib/avr/include/util/delay.h **** 		__ticks = 1;
+ 170:/usr/lib/avr/include/util/delay.h **** 	else if (__tmp > 65535)
+ 171:/usr/lib/avr/include/util/delay.h **** 	{
+ 172:/usr/lib/avr/include/util/delay.h **** 		//	__ticks = requested delay in 1/10 ms
+ 173:/usr/lib/avr/include/util/delay.h **** 		__ticks = (uint16_t) (__ms * 10.0);
+ 174:/usr/lib/avr/include/util/delay.h **** 		while(__ticks)
+ 175:/usr/lib/avr/include/util/delay.h **** 		{
+ 176:/usr/lib/avr/include/util/delay.h **** 			// wait 1/10 ms
+ 177:/usr/lib/avr/include/util/delay.h **** 			_delay_loop_2(((F_CPU) / 4e3) / 10);
+ 178:/usr/lib/avr/include/util/delay.h **** 			__ticks --;
+ 179:/usr/lib/avr/include/util/delay.h **** 		}
+ 180:/usr/lib/avr/include/util/delay.h **** 		return;
+ 181:/usr/lib/avr/include/util/delay.h **** 	}
+ 182:/usr/lib/avr/include/util/delay.h **** 	else
+ 183:/usr/lib/avr/include/util/delay.h **** 		__ticks = (uint16_t)__tmp;
+ 184:/usr/lib/avr/include/util/delay.h **** 	_delay_loop_2(__ticks);
+ 185:/usr/lib/avr/include/util/delay.h **** #endif
+ 186:/usr/lib/avr/include/util/delay.h **** }
+ 187:/usr/lib/avr/include/util/delay.h **** 
+ 188:/usr/lib/avr/include/util/delay.h **** /**
+ 189:/usr/lib/avr/include/util/delay.h ****    \ingroup util_delay
+ 190:/usr/lib/avr/include/util/delay.h **** 
+ 191:/usr/lib/avr/include/util/delay.h ****    Perform a delay of \c __us microseconds, using _delay_loop_1().
+ 192:/usr/lib/avr/include/util/delay.h **** 
+ 193:/usr/lib/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 194:/usr/lib/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 195:/usr/lib/avr/include/util/delay.h **** 
+ 196:/usr/lib/avr/include/util/delay.h ****    The maximal possible delay is 768 us / F_CPU in MHz.
+ 197:/usr/lib/avr/include/util/delay.h **** 
+ 198:/usr/lib/avr/include/util/delay.h ****    If the user requests a delay greater than the maximal possible one,
+ 199:/usr/lib/avr/include/util/delay.h ****    _delay_us() will automatically call _delay_ms() instead.  The user
+ 200:/usr/lib/avr/include/util/delay.h ****    will not be informed about this case.
+ 201:/usr/lib/avr/include/util/delay.h **** 
+ 202:/usr/lib/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles(unsigned long)
+ 203:/usr/lib/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 us/ F_CPU in MHz. For
+ 204:/usr/lib/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflow results in
+ 205:/usr/lib/avr/include/util/delay.h ****    no delay i.e., 0us.
+ 206:/usr/lib/avr/include/util/delay.h ****   
+ 207:/usr/lib/avr/include/util/delay.h ****    Conversion of __us into clock cycles may not always result in integer.
+ 208:/usr/lib/avr/include/util/delay.h ****    By default, the clock cycles rounded up to next integer. This ensures that
+ 209:/usr/lib/avr/include/util/delay.h ****    the user gets atleast __us microseconds of delay.
+ 210:/usr/lib/avr/include/util/delay.h **** 
+ 211:/usr/lib/avr/include/util/delay.h ****    Alternatively, user can define __DELAY_ROUND_DOWN__ and __DELAY_ROUND_CLOSEST__
+ 212:/usr/lib/avr/include/util/delay.h ****    to round down and round to closest integer.
+ 213:/usr/lib/avr/include/util/delay.h ****  
+ 214:/usr/lib/avr/include/util/delay.h ****    Note: The new implementation of _delay_us(double __us) with 
+ 215:/usr/lib/avr/include/util/delay.h ****     __builtin_avr_delay_cycles(unsigned long) support is not backward compatible.
+ 216:/usr/lib/avr/include/util/delay.h ****    User can define __DELAY_BACKWARD_COMPATIBLE__ to get a backward compatible delay.
+ 217:/usr/lib/avr/include/util/delay.h ****    Also, the backward compatible
+ 218:/usr/lib/avr/include/util/delay.h ****    algorithm will be chosen if the code is compiled in a <em>freestanding
+ 219:/usr/lib/avr/include/util/delay.h ****    environment</em> (GCC option \c -ffreestanding), as the math functions
+ 220:/usr/lib/avr/include/util/delay.h ****    required for rounding are not available to the compiler then.
+ 221:/usr/lib/avr/include/util/delay.h **** 
+ 222:/usr/lib/avr/include/util/delay.h ****  */
+ 223:/usr/lib/avr/include/util/delay.h **** void
+ 224:/usr/lib/avr/include/util/delay.h **** _delay_us(double __us)
+ 225:/usr/lib/avr/include/util/delay.h **** {
+ 226:/usr/lib/avr/include/util/delay.h **** 	uint8_t __ticks;
+ 227:/usr/lib/avr/include/util/delay.h **** 	double __tmp ; 
+ 228:/usr/lib/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 229:/usr/lib/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 230:/usr/lib/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 231:/usr/lib/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 232:/usr/lib/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 233:/usr/lib/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e6) * __us;
+ 234:/usr/lib/avr/include/util/delay.h **** 
+ 235:/usr/lib/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 236:/usr/lib/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 237:/usr/lib/avr/include/util/delay.h **** 
+ 238:/usr/lib/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 239:/usr/lib/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 240:/usr/lib/avr/include/util/delay.h **** 
+ 241:/usr/lib/avr/include/util/delay.h **** 	#else
+ 242:/usr/lib/avr/include/util/delay.h **** 		//round up by default
+ 243:/usr/lib/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 244:/usr/lib/avr/include/util/delay.h **** 	#endif
+ 245:/usr/lib/avr/include/util/delay.h **** 
+ 246:/usr/lib/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 326               		.loc 3 246 0
+ 327 0074 80EA      		ldi r24,lo8(-96)
+ 328 0076 8A95      		1: dec r24
+ 329 0078 01F4      		brne 1b
+ 330               	.LBE45:
+ 331               	.LBE44:
+ 332               	.LBB46:
+ 333               	.LBB47:
+ 172:matrix.c      ****     return (PINF&(1<<7) ? 0 : (1<<14)) |
+ 334               		.loc 1 172 0
+ 335 007a 4FB1      		in r20,0xf
+ 336 007c 5527      		clr r21
+ 337 007e 47FD      		sbrc r20,7
+ 338 0080 5095      		com r21
+ 339 0082 4095      		com r20
+ 340 0084 5095      		com r21
+ 341 0086 4427      		clr r20
+ 342 0088 550F      		lsl r21
+ 343 008a 441F      		rol r20
+ 344 008c 5527      		clr r21
+ 345 008e 50E4      		ldi r21,0x40
+ 346 0090 459F      		mul r20,r21
+ 347 0092 502D      		mov r21,r0
+ 348 0094 4427      		clr r20
+ 349 0096 1124      		clr __zero_reg__
+ 173:matrix.c      ****            (PINB&(1<<6) ? 0 : (1<<13)) |
+ 350               		.loc 1 173 0
+ 351 0098 1E9B      		sbis 0x3,6
+ 352 009a 00C0      		rjmp .L49
+ 353 009c C12C      		mov r12,__zero_reg__
+ 354 009e D12C      		mov r13,__zero_reg__
+ 355 00a0 00C0      		rjmp .L19
+ 356               	.L49:
+ 357 00a2 C12C      		mov r12,__zero_reg__
+ 358 00a4 20E2      		ldi r18,lo8(32)
+ 359 00a6 D22E      		mov r13,r18
+ 360               	.L19:
+ 174:matrix.c      ****            (PINB&(1<<5) ? 0 : (1<<12)) |
+ 361               		.loc 1 174 0
+ 362 00a8 1D9B      		sbis 0x3,5
+ 363 00aa 00C0      		rjmp .L50
+ 364 00ac 1886      		std Y+8,__zero_reg__
+ 365 00ae 1F82      		std Y+7,__zero_reg__
+ 366 00b0 00C0      		rjmp .L20
+ 367               	.L50:
+ 368 00b2 A0E0      		ldi r26,0
+ 369 00b4 B0E1      		ldi r27,lo8(16)
+ 370 00b6 B887      		std Y+8,r27
+ 371 00b8 AF83      		std Y+7,r26
+ 372               	.L20:
+ 175:matrix.c      ****            (PINB&(1<<4) ? 0 : (1<<11)) |
+ 373               		.loc 1 175 0
+ 374 00ba 1C9B      		sbis 0x3,4
+ 375 00bc 00C0      		rjmp .L51
+ 376 00be A12C      		mov r10,__zero_reg__
+ 377 00c0 B12C      		mov r11,__zero_reg__
+ 378 00c2 00C0      		rjmp .L21
+ 379               	.L51:
+ 380 00c4 A12C      		mov r10,__zero_reg__
+ 381 00c6 98E0      		ldi r25,lo8(8)
+ 382 00c8 B92E      		mov r11,r25
+ 383               	.L21:
+ 176:matrix.c      ****            (PIND&(1<<7) ? 0 : (1<<10)) |
+ 384               		.loc 1 176 0
+ 385 00ca 29B1      		in r18,0x9
+ 386 00cc 3327      		clr r19
+ 387 00ce 27FD      		sbrc r18,7
+ 388 00d0 3095      		com r19
+ 389 00d2 2095      		com r18
+ 390 00d4 3095      		com r19
+ 391 00d6 2227      		clr r18
+ 392 00d8 330F      		lsl r19
+ 393 00da 221F      		rol r18
+ 394 00dc 3327      		clr r19
+ 395 00de 322F      		mov r19,r18
+ 396 00e0 2227      		clr r18
+ 397 00e2 330F      		lsl r19
+ 398 00e4 330F      		lsl r19
+ 177:matrix.c      ****            (PIND&(1<<4) ? 0 : (1<<9)) |
+ 399               		.loc 1 177 0
+ 400 00e6 4C9B      		sbis 0x9,4
+ 401 00e8 00C0      		rjmp .L53
+ 402 00ea 612C      		mov r6,__zero_reg__
+ 403 00ec 712C      		mov r7,__zero_reg__
+ 404 00ee 00C0      		rjmp .L23
+ 405               	.L53:
+ 406 00f0 612C      		mov r6,__zero_reg__
+ 407 00f2 A2E0      		ldi r26,lo8(2)
+ 408 00f4 7A2E      		mov r7,r26
+ 409               	.L23:
+ 178:matrix.c      ****            (PINC&(1<<6) ? 0 : (1<<8)) |
+ 410               		.loc 1 178 0
+ 411 00f6 369B      		sbis 0x6,6
+ 412 00f8 00C0      		rjmp .L54
+ 413 00fa 412C      		mov r4,__zero_reg__
+ 414 00fc 512C      		mov r5,__zero_reg__
+ 415 00fe 00C0      		rjmp .L24
+ 416               	.L54:
+ 417 0100 412C      		mov r4,__zero_reg__
+ 418 0102 5524      		clr r5
+ 419 0104 5394      		inc r5
+ 420               	.L24:
+ 179:matrix.c      ****            (PIND&(1<<3) ? 0 : (1<<7)) |
+ 421               		.loc 1 179 0
+ 422 0106 4B9B      		sbis 0x9,3
+ 423 0108 00C0      		rjmp .L55
+ 424 010a 212C      		mov r2,__zero_reg__
+ 425 010c 312C      		mov r3,__zero_reg__
+ 426 010e 00C0      		rjmp .L25
+ 427               	.L55:
+ 428 0110 E0E8      		ldi r30,lo8(-128)
+ 429 0112 2E2E      		mov r2,r30
+ 430 0114 312C      		mov r3,__zero_reg__
+ 431               	.L25:
+ 180:matrix.c      ****            (PIND&(1<<2) ? 0 : (1<<6)) |
+ 432               		.loc 1 180 0
+ 433 0116 4A9B      		sbis 0x9,2
+ 434 0118 00C0      		rjmp .L56
+ 435 011a 1A82      		std Y+2,__zero_reg__
+ 436 011c 1982      		std Y+1,__zero_reg__
+ 437 011e 00C0      		rjmp .L26
+ 438               	.L56:
+ 439 0120 E0E4      		ldi r30,lo8(64)
+ 440 0122 F0E0      		ldi r31,0
+ 441 0124 FA83      		std Y+2,r31
+ 442 0126 E983      		std Y+1,r30
+ 443               	.L26:
+ 181:matrix.c      ****            (PIND&(1<<1) ? 0 : (1<<5)) |
+ 444               		.loc 1 181 0
+ 445 0128 499B      		sbis 0x9,1
+ 446 012a 00C0      		rjmp .L57
+ 447 012c 1C82      		std Y+4,__zero_reg__
+ 448 012e 1B82      		std Y+3,__zero_reg__
+ 449 0130 00C0      		rjmp .L27
+ 450               	.L57:
+ 451 0132 80E2      		ldi r24,lo8(32)
+ 452 0134 90E0      		ldi r25,0
+ 453 0136 9C83      		std Y+4,r25
+ 454 0138 8B83      		std Y+3,r24
+ 455               	.L27:
+ 182:matrix.c      ****            (PIND&(1<<0) ? 0 : (1<<4)) |
+ 456               		.loc 1 182 0
+ 457 013a 489B      		sbis 0x9,0
+ 458 013c 00C0      		rjmp .L58
+ 459 013e 1A86      		std Y+10,__zero_reg__
+ 460 0140 1986      		std Y+9,__zero_reg__
+ 461 0142 00C0      		rjmp .L28
+ 462               	.L58:
+ 463 0144 A0E1      		ldi r26,lo8(16)
+ 464 0146 B0E0      		ldi r27,0
+ 465 0148 BA87      		std Y+10,r27
+ 466 014a A987      		std Y+9,r26
+ 467               	.L28:
+ 183:matrix.c      ****            (PINB&(1<<7) ? 0 : (1<<3)) |
+ 468               		.loc 1 183 0
+ 469 014c 83B1      		in r24,0x3
+ 470 014e 9927      		clr r25
+ 471 0150 87FD      		sbrc r24,7
+ 472 0152 9095      		com r25
+ 473 0154 8095      		com r24
+ 474 0156 9095      		com r25
+ 475 0158 8827      		clr r24
+ 476 015a 990F      		lsl r25
+ 477 015c 881F      		rol r24
+ 478 015e 9927      		clr r25
+ 479 0160 73E0      		ldi r23,3
+ 480               		1:
+ 481 0162 880F      		lsl r24
+ 482 0164 991F      		rol r25
+ 483 0166 7A95      		dec r23
+ 484 0168 01F4      		brne 1b
+ 184:matrix.c      ****            (PINB&(1<<3) ? 0 : (1<<2)) |
+ 485               		.loc 1 184 0
+ 486 016a 1B9B      		sbis 0x3,3
+ 487 016c 00C0      		rjmp .L60
+ 488 016e E0E0      		ldi r30,0
+ 489 0170 F0E0      		ldi r31,0
+ 490 0172 00C0      		rjmp .L30
+ 491               	.L60:
+ 492 0174 E4E0      		ldi r30,lo8(4)
+ 493 0176 F0E0      		ldi r31,0
+ 494               	.L30:
+ 185:matrix.c      ****            (PINB&(1<<0) ? 0 : (1<<1)) |
+ 495               		.loc 1 185 0
+ 496 0178 189B      		sbis 0x3,0
+ 497 017a 00C0      		rjmp .L61
+ 498 017c 60E0      		ldi r22,0
+ 499 017e 70E0      		ldi r23,0
+ 500 0180 00C0      		rjmp .L31
+ 501               	.L61:
+ 502 0182 62E0      		ldi r22,lo8(2)
+ 503 0184 70E0      		ldi r23,0
+ 504               	.L31:
+ 186:matrix.c      ****            (PINB&(1<<1) ? 0 : (1<<0));
+ 505               		.loc 1 186 0
+ 506 0186 83B0      		in r8,0x3
+ 507 0188 8694      		lsr r8
+ 508 018a B1E0      		ldi r27,lo8(1)
+ 509 018c 8B26      		eor r8,r27
+ 510 018e 80FA      		bst r8,0
+ 511 0190 EE24      		clr r14
+ 512 0192 E0F8      		bld r14,0
+ 513 0194 F12C      		mov r15,__zero_reg__
+ 172:matrix.c      ****     return (PINF&(1<<7) ? 0 : (1<<14)) |
+ 514               		.loc 1 172 0
+ 515 0196 E42A      		or r14,r20
+ 516 0198 F52A      		or r15,r21
+ 173:matrix.c      ****            (PINB&(1<<6) ? 0 : (1<<13)) |
+ 517               		.loc 1 173 0
+ 518 019a EC28      		or r14,r12
+ 519 019c FD28      		or r15,r13
+ 174:matrix.c      ****            (PINB&(1<<5) ? 0 : (1<<12)) |
+ 520               		.loc 1 174 0
+ 521 019e 4F81      		ldd r20,Y+7
+ 522 01a0 5885      		ldd r21,Y+8
+ 523 01a2 E42A      		or r14,r20
+ 524 01a4 F52A      		or r15,r21
+ 175:matrix.c      ****            (PINB&(1<<4) ? 0 : (1<<11)) |
+ 525               		.loc 1 175 0
+ 526 01a6 EA28      		or r14,r10
+ 527 01a8 FB28      		or r15,r11
+ 176:matrix.c      ****            (PIND&(1<<7) ? 0 : (1<<10)) |
+ 528               		.loc 1 176 0
+ 529 01aa E22A      		or r14,r18
+ 530 01ac F32A      		or r15,r19
+ 177:matrix.c      ****            (PIND&(1<<4) ? 0 : (1<<9)) |
+ 531               		.loc 1 177 0
+ 532 01ae E628      		or r14,r6
+ 533 01b0 F728      		or r15,r7
+ 178:matrix.c      ****            (PINC&(1<<6) ? 0 : (1<<8)) |
+ 534               		.loc 1 178 0
+ 535 01b2 E428      		or r14,r4
+ 536 01b4 F528      		or r15,r5
+ 179:matrix.c      ****            (PIND&(1<<3) ? 0 : (1<<7)) |
+ 537               		.loc 1 179 0
+ 538 01b6 E228      		or r14,r2
+ 539 01b8 F328      		or r15,r3
+ 180:matrix.c      ****            (PIND&(1<<2) ? 0 : (1<<6)) |
+ 540               		.loc 1 180 0
+ 541 01ba A981      		ldd r26,Y+1
+ 542 01bc BA81      		ldd r27,Y+2
+ 543 01be EA2A      		or r14,r26
+ 544 01c0 FB2A      		or r15,r27
+ 181:matrix.c      ****            (PIND&(1<<1) ? 0 : (1<<5)) |
+ 545               		.loc 1 181 0
+ 546 01c2 2B81      		ldd r18,Y+3
+ 547 01c4 3C81      		ldd r19,Y+4
+ 548 01c6 E22A      		or r14,r18
+ 549 01c8 F32A      		or r15,r19
+ 182:matrix.c      ****            (PIND&(1<<0) ? 0 : (1<<4)) |
+ 550               		.loc 1 182 0
+ 551 01ca 4985      		ldd r20,Y+9
+ 552 01cc 5A85      		ldd r21,Y+10
+ 553 01ce E42A      		or r14,r20
+ 554 01d0 F52A      		or r15,r21
+ 183:matrix.c      ****            (PINB&(1<<7) ? 0 : (1<<3)) |
+ 555               		.loc 1 183 0
+ 556 01d2 E82A      		or r14,r24
+ 557 01d4 F92A      		or r15,r25
+ 184:matrix.c      ****            (PINB&(1<<3) ? 0 : (1<<2)) |
+ 558               		.loc 1 184 0
+ 559 01d6 EE2A      		or r14,r30
+ 560 01d8 FF2A      		or r15,r31
+ 185:matrix.c      ****            (PINB&(1<<0) ? 0 : (1<<1)) |
+ 561               		.loc 1 185 0
+ 562 01da E62A      		or r14,r22
+ 563 01dc F72A      		or r15,r23
+ 564               	.LBE47:
+ 565               	.LBE46:
+  78:matrix.c      ****         if (matrix_debouncing[i] != cols) {
+ 566               		.loc 1 78 0
+ 567 01de D801      		movw r26,r16
+ 568 01e0 8D91      		ld r24,X+
+ 569 01e2 9C91      		ld r25,X
+ 570 01e4 1197      		sbiw r26,1
+ 571 01e6 8E15      		cp r24,r14
+ 572 01e8 9F05      		cpc r25,r15
+ 573 01ea 01F0      		breq .L32
+  79:matrix.c      ****             matrix_debouncing[i] = cols;
+ 574               		.loc 1 79 0
+ 575 01ec ED92      		st X+,r14
+ 576 01ee FC92      		st X,r15
+  80:matrix.c      ****             if (debouncing) {
+ 577               		.loc 1 80 0
+ 578 01f0 8091 0000 		lds r24,debouncing
+ 579 01f4 8823      		tst r24
+ 580 01f6 01F0      		breq .L34
+  81:matrix.c      ****                 debug("bounce!: "); debug_hex(debouncing); debug("\n");
+ 581               		.loc 1 81 0
+ 582 01f8 8091 0000 		lds r24,debug_config
+ 583 01fc 80FF      		sbrs r24,0
+ 584 01fe 00C0      		rjmp .L35
+  81:matrix.c      ****                 debug("bounce!: "); debug_hex(debouncing); debug("\n");
+ 585               		.loc 1 81 0 is_stmt 0 discriminator 1
+ 586 0200 80E0      		ldi r24,lo8(__c.2360)
+ 587 0202 90E0      		ldi r25,hi8(__c.2360)
+ 588 0204 0E94 0000 		call xputs
+ 589               	.LVL6:
+ 590               	.L35:
+  81:matrix.c      ****                 debug("bounce!: "); debug_hex(debouncing); debug("\n");
+ 591               		.loc 1 81 0 discriminator 2
+ 592 0208 8091 0000 		lds r24,debug_config
+ 593 020c 80FF      		sbrs r24,0
+ 594 020e 00C0      		rjmp .L36
+  81:matrix.c      ****                 debug("bounce!: "); debug_hex(debouncing); debug("\n");
+ 595               		.loc 1 81 0 discriminator 1
+ 596 0210 8091 0000 		lds r24,debouncing
+ 597 0214 1F92      		push __zero_reg__
+ 598 0216 8F93      		push r24
+ 599 0218 A0E0      		ldi r26,lo8(__c.2362)
+ 600 021a B0E0      		ldi r27,hi8(__c.2362)
+ 601 021c BF93      		push r27
+ 602 021e AF93      		push r26
+ 603 0220 0E94 0000 		call __xprintf
+ 604               	.LVL7:
+ 605 0224 0F90      		pop __tmp_reg__
+ 606 0226 0F90      		pop __tmp_reg__
+ 607 0228 0F90      		pop __tmp_reg__
+ 608 022a 0F90      		pop __tmp_reg__
+ 609               	.L36:
+  81:matrix.c      ****                 debug("bounce!: "); debug_hex(debouncing); debug("\n");
+ 610               		.loc 1 81 0 discriminator 2
+ 611 022c 8091 0000 		lds r24,debug_config
+ 612 0230 80FF      		sbrs r24,0
+ 613 0232 00C0      		rjmp .L34
+  81:matrix.c      ****                 debug("bounce!: "); debug_hex(debouncing); debug("\n");
+ 614               		.loc 1 81 0 discriminator 1
+ 615 0234 80E0      		ldi r24,lo8(__c.2364)
+ 616 0236 90E0      		ldi r25,hi8(__c.2364)
+ 617 0238 0E94 0000 		call xputs
+ 618               	.LVL8:
+ 619               	.L34:
+  83:matrix.c      ****             debouncing = DEBOUNCE;
+ 620               		.loc 1 83 0 is_stmt 1
+ 621 023c F5E0      		ldi r31,lo8(5)
+ 622 023e F093 0000 		sts debouncing,r31
+ 623               	.L32:
+  85:matrix.c      ****         unselect_rows();
+ 624               		.loc 1 85 0
+ 625 0242 0E94 0000 		call unselect_rows
+ 626               	.LVL9:
+ 627               	.LBE41:
+  74:matrix.c      ****     for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+ 628               		.loc 1 74 0
+ 629 0246 9394      		inc r9
+ 630               	.LVL10:
+ 631 0248 0E5F      		subi r16,-2
+ 632 024a 1F4F      		sbci r17,-1
+ 633 024c 25E0      		ldi r18,lo8(5)
+ 634 024e 9212      		cpse r9,r18
+ 635 0250 00C0      		rjmp .L39
+ 636               	.LBE40:
+  88:matrix.c      ****     if (debouncing) {
+ 637               		.loc 1 88 0
+ 638 0252 8091 0000 		lds r24,debouncing
+ 639 0256 8823      		tst r24
+ 640 0258 01F0      		breq .L41
+  89:matrix.c      ****         if (--debouncing) {
+ 641               		.loc 1 89 0
+ 642 025a 8150      		subi r24,lo8(-(-1))
+ 643 025c 8093 0000 		sts debouncing,r24
+ 644 0260 8823      		tst r24
+ 645 0262 01F0      		breq .L42
+ 646               	.LVL11:
+ 647               	.LBB48:
+ 648               	.LBB49:
+ 164:/usr/lib/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 649               		.loc 3 164 0
+ 650 0264 8FE9      		ldi r24,lo8(3999)
+ 651 0266 9FE0      		ldi r25,hi8(3999)
+ 652 0268 0197      		1: sbiw r24,1
+ 653 026a 01F4      		brne 1b
+ 654 026c 00C0      		rjmp .
+ 655 026e 0000      		nop
+ 656 0270 00C0      		rjmp .L41
+ 657               	.LVL12:
+ 658               	.L42:
+ 659 0272 A0E0      		ldi r26,lo8(matrix)
+ 660 0274 B0E0      		ldi r27,hi8(matrix)
+ 661               	.LBE49:
+ 662               	.LBE48:
+  89:matrix.c      ****         if (--debouncing) {
+ 663               		.loc 1 89 0
+ 664 0276 E0E0      		ldi r30,lo8(matrix_debouncing)
+ 665 0278 F0E0      		ldi r31,hi8(matrix_debouncing)
+ 666               	.L44:
+ 667               	.LBB50:
+  93:matrix.c      ****                 matrix[i] = matrix_debouncing[i];
+ 668               		.loc 1 93 0 discriminator 2
+ 669 027a 8191      		ld r24,Z+
+ 670 027c 9191      		ld r25,Z+
+ 671 027e 8D93      		st X+,r24
+ 672 0280 9D93      		st X+,r25
+ 673               	.LVL13:
+  92:matrix.c      ****             for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+ 674               		.loc 1 92 0 discriminator 2
+ 675 0282 90E0      		ldi r25,hi8(matrix_debouncing+10)
+ 676 0284 E030      		cpi r30,lo8(matrix_debouncing+10)
+ 677 0286 F907      		cpc r31,r25
+ 678 0288 01F4      		brne .L44
+ 679               	.L41:
+ 680               	.LBE50:
+  98:matrix.c      ****     uint8_t layer = biton32(layer_state);
+ 681               		.loc 1 98 0
+ 682 028a 6091 0000 		lds r22,layer_state
+ 683 028e 7091 0000 		lds r23,layer_state+1
+ 684 0292 8091 0000 		lds r24,layer_state+2
+ 685 0296 9091 0000 		lds r25,layer_state+3
+ 686 029a 0E94 0000 		call biton32
+ 687               	.LVL14:
+  99:matrix.c      ****     switch (layer) {
+ 688               		.loc 1 99 0
+ 689 029e 8823      		tst r24
+ 690 02a0 01F0      		breq .L46
+ 691 02a2 8330      		cpi r24,lo8(3)
+ 692 02a4 00F4      		brsh .L45
+ 102:matrix.c      ****             DDRC |= (1<<7);
+ 693               		.loc 1 102 0
+ 694 02a6 3F9A      		sbi 0x7,7
+ 103:matrix.c      ****             PORTC |= (1<<7);
+ 695               		.loc 1 103 0
+ 696 02a8 479A      		sbi 0x8,7
+ 104:matrix.c      ****             break;
+ 697               		.loc 1 104 0
+ 698 02aa 00C0      		rjmp .L45
+ 699               	.L46:
+ 106:matrix.c      ****             DDRC &= ~(1<<7);
+ 700               		.loc 1 106 0
+ 701 02ac 3F98      		cbi 0x7,7
+ 107:matrix.c      ****             PORTC &= ~(1<<7);
+ 702               		.loc 1 107 0
+ 703 02ae 4798      		cbi 0x8,7
+ 704               	.L45:
+ 112:matrix.c      **** }
+ 705               		.loc 1 112 0
+ 706 02b0 81E0      		ldi r24,lo8(1)
+ 707               	.LVL15:
+ 708               	/* epilogue start */
+ 709 02b2 2A96      		adiw r28,10
+ 710 02b4 0FB6      		in __tmp_reg__,__SREG__
+ 711 02b6 F894      		cli
+ 712 02b8 DEBF      		out __SP_H__,r29
+ 713 02ba 0FBE      		out __SREG__,__tmp_reg__
+ 714 02bc CDBF      		out __SP_L__,r28
+ 715 02be DF91      		pop r29
+ 716 02c0 CF91      		pop r28
+ 717 02c2 1F91      		pop r17
+ 718 02c4 0F91      		pop r16
+ 719 02c6 FF90      		pop r15
+ 720 02c8 EF90      		pop r14
+ 721 02ca DF90      		pop r13
+ 722 02cc CF90      		pop r12
+ 723 02ce BF90      		pop r11
+ 724 02d0 AF90      		pop r10
+ 725 02d2 9F90      		pop r9
+ 726               	.LVL16:
+ 727 02d4 8F90      		pop r8
+ 728 02d6 7F90      		pop r7
+ 729 02d8 6F90      		pop r6
+ 730 02da 5F90      		pop r5
+ 731 02dc 4F90      		pop r4
+ 732 02de 3F90      		pop r3
+ 733 02e0 2F90      		pop r2
+ 734 02e2 0895      		ret
+ 735               		.cfi_endproc
+ 736               	.LFE15:
+ 738               		.section	.text.matrix_is_modified,"ax",@progbits
+ 739               	.global	matrix_is_modified
+ 741               	matrix_is_modified:
+ 742               	.LFB16:
+ 115:matrix.c      **** {
+ 743               		.loc 1 115 0
+ 744               		.cfi_startproc
+ 745               	/* prologue: function */
+ 746               	/* frame size = 0 */
+ 747               	/* stack size = 0 */
+ 748               	.L__stack_usage = 0
+ 116:matrix.c      ****     if (debouncing) return false;
+ 749               		.loc 1 116 0
+ 750 0000 81E0      		ldi r24,lo8(1)
+ 751 0002 9091 0000 		lds r25,debouncing
+ 752 0006 9111      		cpse r25,__zero_reg__
+ 753 0008 80E0      		ldi r24,0
+ 754               	.L74:
+ 118:matrix.c      **** }
+ 755               		.loc 1 118 0
+ 756 000a 0895      		ret
+ 757               		.cfi_endproc
+ 758               	.LFE16:
+ 760               		.section	.text.matrix_is_on,"ax",@progbits
+ 761               	.global	matrix_is_on
+ 763               	matrix_is_on:
+ 764               	.LFB17:
+ 122:matrix.c      **** {
+ 765               		.loc 1 122 0
+ 766               		.cfi_startproc
+ 767               	.LVL17:
+ 768               	/* prologue: function */
+ 769               	/* frame size = 0 */
+ 770               	/* stack size = 0 */
+ 771               	.L__stack_usage = 0
+ 123:matrix.c      ****     return (matrix[row] & ((matrix_row_t)1<<col));
+ 772               		.loc 1 123 0
+ 773 0000 E82F      		mov r30,r24
+ 774 0002 F0E0      		ldi r31,0
+ 775 0004 EE0F      		lsl r30
+ 776 0006 FF1F      		rol r31
+ 777 0008 E050      		subi r30,lo8(-(matrix))
+ 778 000a F040      		sbci r31,hi8(-(matrix))
+ 779 000c 21E0      		ldi r18,lo8(1)
+ 780 000e 30E0      		ldi r19,0
+ 781 0010 00C0      		rjmp 2f
+ 782               		1:
+ 783 0012 220F      		lsl r18
+ 784 0014 331F      		rol r19
+ 785               		2:
+ 786 0016 6A95      		dec r22
+ 787 0018 02F4      		brpl 1b
+ 788 001a 8081      		ld r24,Z
+ 789 001c 9181      		ldd r25,Z+1
+ 790               	.LVL18:
+ 791 001e 2823      		and r18,r24
+ 792 0020 3923      		and r19,r25
+ 793 0022 81E0      		ldi r24,lo8(1)
+ 794 0024 232B      		or r18,r19
+ 795 0026 01F4      		brne .L79
+ 796 0028 80E0      		ldi r24,0
+ 797               	.L79:
+ 124:matrix.c      **** }
+ 798               		.loc 1 124 0
+ 799 002a 0895      		ret
+ 800               		.cfi_endproc
+ 801               	.LFE17:
+ 803               		.section	.text.matrix_get_row,"ax",@progbits
+ 804               	.global	matrix_get_row
+ 806               	matrix_get_row:
+ 807               	.LFB18:
+ 128:matrix.c      **** {
+ 808               		.loc 1 128 0
+ 809               		.cfi_startproc
+ 810               	.LVL19:
+ 811               	/* prologue: function */
+ 812               	/* frame size = 0 */
+ 813               	/* stack size = 0 */
+ 814               	.L__stack_usage = 0
+ 129:matrix.c      ****     return matrix[row];
+ 815               		.loc 1 129 0
+ 816 0000 E82F      		mov r30,r24
+ 817 0002 F0E0      		ldi r31,0
+ 818 0004 EE0F      		lsl r30
+ 819 0006 FF1F      		rol r31
+ 820 0008 E050      		subi r30,lo8(-(matrix))
+ 821 000a F040      		sbci r31,hi8(-(matrix))
+ 130:matrix.c      **** }
+ 822               		.loc 1 130 0
+ 823 000c 8081      		ld r24,Z
+ 824 000e 9181      		ldd r25,Z+1
+ 825               	.LVL20:
+ 826 0010 0895      		ret
+ 827               		.cfi_endproc
+ 828               	.LFE18:
+ 830               		.section	.text.matrix_print,"ax",@progbits
+ 831               	.global	matrix_print
+ 833               	matrix_print:
+ 834               	.LFB19:
+ 133:matrix.c      **** {
+ 835               		.loc 1 133 0
+ 836               		.cfi_startproc
+ 837 0000 CF92      		push r12
+ 838               	.LCFI20:
+ 839               		.cfi_def_cfa_offset 3
+ 840               		.cfi_offset 12, -2
+ 841 0002 DF92      		push r13
+ 842               	.LCFI21:
+ 843               		.cfi_def_cfa_offset 4
+ 844               		.cfi_offset 13, -3
+ 845 0004 EF92      		push r14
+ 846               	.LCFI22:
+ 847               		.cfi_def_cfa_offset 5
+ 848               		.cfi_offset 14, -4
+ 849 0006 FF92      		push r15
+ 850               	.LCFI23:
+ 851               		.cfi_def_cfa_offset 6
+ 852               		.cfi_offset 15, -5
+ 853 0008 0F93      		push r16
+ 854               	.LCFI24:
+ 855               		.cfi_def_cfa_offset 7
+ 856               		.cfi_offset 16, -6
+ 857 000a 1F93      		push r17
+ 858               	.LCFI25:
+ 859               		.cfi_def_cfa_offset 8
+ 860               		.cfi_offset 17, -7
+ 861 000c CF93      		push r28
+ 862               	.LCFI26:
+ 863               		.cfi_def_cfa_offset 9
+ 864               		.cfi_offset 28, -8
+ 865 000e DF93      		push r29
+ 866               	.LCFI27:
+ 867               		.cfi_def_cfa_offset 10
+ 868               		.cfi_offset 29, -9
+ 869               	/* prologue: function */
+ 870               	/* frame size = 0 */
+ 871               	/* stack size = 8 */
+ 872               	.L__stack_usage = 8
+ 134:matrix.c      ****     print("\nr/c 0123456789ABCDEF\n");
+ 873               		.loc 1 134 0
+ 874 0010 80E0      		ldi r24,lo8(__c.2391)
+ 875 0012 90E0      		ldi r25,hi8(__c.2391)
+ 876 0014 0E94 0000 		call xputs
+ 877 0018 B0E0      		ldi r27,lo8(matrix)
+ 878 001a EB2E      		mov r14,r27
+ 879 001c B0E0      		ldi r27,hi8(matrix)
+ 880 001e FB2E      		mov r15,r27
+ 881 0020 C0E0      		ldi r28,0
+ 882 0022 D0E0      		ldi r29,0
+ 883               	.LBB51:
+ 136:matrix.c      ****         phex(row); print(": ");
+ 884               		.loc 1 136 0
+ 885 0024 10E0      		ldi r17,lo8(__c.2394)
+ 886 0026 C12E      		mov r12,r17
+ 887 0028 10E0      		ldi r17,hi8(__c.2394)
+ 888 002a D12E      		mov r13,r17
+ 137:matrix.c      ****         pbin_reverse16(matrix_get_row(row));
+ 889               		.loc 1 137 0
+ 890 002c 00E0      		ldi r16,lo8(__c.2398)
+ 891 002e 10E0      		ldi r17,hi8(__c.2398)
+ 892               	.L83:
+ 136:matrix.c      ****         phex(row); print(": ");
+ 893               		.loc 1 136 0 discriminator 2
+ 894 0030 DF93      		push r29
+ 895               	.LCFI28:
+ 896               		.cfi_def_cfa_offset 11
+ 897 0032 CF93      		push r28
+ 898               	.LCFI29:
+ 899               		.cfi_def_cfa_offset 12
+ 900 0034 DF92      		push r13
+ 901               	.LCFI30:
+ 902               		.cfi_def_cfa_offset 13
+ 903 0036 CF92      		push r12
+ 904               	.LCFI31:
+ 905               		.cfi_def_cfa_offset 14
+ 906 0038 0E94 0000 		call __xprintf
+ 907 003c 80E0      		ldi r24,lo8(__c.2396)
+ 908 003e 90E0      		ldi r25,hi8(__c.2396)
+ 909 0040 0E94 0000 		call xputs
+ 137:matrix.c      ****         pbin_reverse16(matrix_get_row(row));
+ 910               		.loc 1 137 0 discriminator 2
+ 911 0044 F701      		movw r30,r14
+ 912 0046 8191      		ld r24,Z+
+ 913 0048 9191      		ld r25,Z+
+ 914 004a 7F01      		movw r14,r30
+ 915 004c 0E94 0000 		call bitrev16
+ 916 0050 9F93      		push r25
+ 917               	.LCFI32:
+ 918               		.cfi_def_cfa_offset 15
+ 919 0052 8F93      		push r24
+ 920               	.LCFI33:
+ 921               		.cfi_def_cfa_offset 16
+ 922 0054 1F93      		push r17
+ 923               	.LCFI34:
+ 924               		.cfi_def_cfa_offset 17
+ 925 0056 0F93      		push r16
+ 926               	.LCFI35:
+ 927               		.cfi_def_cfa_offset 18
+ 928 0058 0E94 0000 		call __xprintf
+ 138:matrix.c      ****         print("\n");
+ 929               		.loc 1 138 0 discriminator 2
+ 930 005c 80E0      		ldi r24,lo8(__c.2400)
+ 931 005e 90E0      		ldi r25,hi8(__c.2400)
+ 932 0060 0E94 0000 		call xputs
+ 933 0064 2196      		adiw r28,1
+ 135:matrix.c      ****     for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+ 934               		.loc 1 135 0 discriminator 2
+ 935 0066 8DB7      		in r24,__SP_L__
+ 936 0068 9EB7      		in r25,__SP_H__
+ 937 006a 0896      		adiw r24,8
+ 938 006c 0FB6      		in __tmp_reg__,__SREG__
+ 939 006e F894      		cli
+ 940 0070 9EBF      		out __SP_H__,r25
+ 941 0072 0FBE      		out __SREG__,__tmp_reg__
+ 942 0074 8DBF      		out __SP_L__,r24
+ 943               	.LCFI36:
+ 944               		.cfi_def_cfa_offset 10
+ 945 0076 C530      		cpi r28,5
+ 946 0078 D105      		cpc r29,__zero_reg__
+ 947 007a 01F4      		brne .L83
+ 948               	/* epilogue start */
+ 949               	.LBE51:
+ 140:matrix.c      **** }
+ 950               		.loc 1 140 0
+ 951 007c DF91      		pop r29
+ 952 007e CF91      		pop r28
+ 953 0080 1F91      		pop r17
+ 954 0082 0F91      		pop r16
+ 955 0084 FF90      		pop r15
+ 956 0086 EF90      		pop r14
+ 957 0088 DF90      		pop r13
+ 958 008a CF90      		pop r12
+ 959 008c 0895      		ret
+ 960               		.cfi_endproc
+ 961               	.LFE19:
+ 963               		.section	.text.matrix_key_count,"ax",@progbits
+ 964               	.global	matrix_key_count
+ 966               	matrix_key_count:
+ 967               	.LFB20:
+ 143:matrix.c      **** {
+ 968               		.loc 1 143 0
+ 969               		.cfi_startproc
+ 970 0000 1F93      		push r17
+ 971               	.LCFI37:
+ 972               		.cfi_def_cfa_offset 3
+ 973               		.cfi_offset 17, -2
+ 974 0002 CF93      		push r28
+ 975               	.LCFI38:
+ 976               		.cfi_def_cfa_offset 4
+ 977               		.cfi_offset 28, -3
+ 978 0004 DF93      		push r29
+ 979               	.LCFI39:
+ 980               		.cfi_def_cfa_offset 5
+ 981               		.cfi_offset 29, -4
+ 982               	/* prologue: function */
+ 983               	/* frame size = 0 */
+ 984               	/* stack size = 3 */
+ 985               	.L__stack_usage = 3
+ 986               	.LVL21:
+ 987 0006 C0E0      		ldi r28,lo8(matrix)
+ 988 0008 D0E0      		ldi r29,hi8(matrix)
+ 144:matrix.c      ****     uint8_t count = 0;
+ 989               		.loc 1 144 0
+ 990 000a 10E0      		ldi r17,0
+ 991               	.LVL22:
+ 992               	.L86:
+ 993               	.LBB52:
+ 146:matrix.c      ****         count += bitpop16(matrix[i]);
+ 994               		.loc 1 146 0 discriminator 2
+ 995 000c 8991      		ld r24,Y+
+ 996 000e 9991      		ld r25,Y+
+ 997 0010 0E94 0000 		call bitpop16
+ 998               	.LVL23:
+ 999 0014 180F      		add r17,r24
+ 1000               	.LVL24:
+ 145:matrix.c      ****     for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+ 1001               		.loc 1 145 0 discriminator 2
+ 1002 0016 80E0      		ldi r24,hi8(matrix+10)
+ 1003 0018 C030      		cpi r28,lo8(matrix+10)
+ 1004 001a D807      		cpc r29,r24
+ 1005 001c 01F4      		brne .L86
+ 1006               	.LBE52:
+ 149:matrix.c      **** }
+ 1007               		.loc 1 149 0
+ 1008 001e 812F      		mov r24,r17
+ 1009               	/* epilogue start */
+ 1010 0020 DF91      		pop r29
+ 1011 0022 CF91      		pop r28
+ 1012 0024 1F91      		pop r17
+ 1013               	.LVL25:
+ 1014 0026 0895      		ret
+ 1015               		.cfi_endproc
+ 1016               	.LFE20:
+ 1018               		.section	.progmem.data,"a",@progbits
+ 1021               	__c.2400:
+ 1022 0000 0A00      		.string	"\n"
+ 1025               	__c.2398:
+ 1026 0002 2530 3136 		.string	"%016b"
+ 1026      6200 
+ 1029               	__c.2396:
+ 1030 0008 3A20 00   		.string	": "
+ 1033               	__c.2394:
+ 1034 000b 2530 3258 		.string	"%02X"
+ 1034      00
+ 1037               	__c.2391:
+ 1038 0010 0A72 2F63 		.string	"\nr/c 0123456789ABCDEF\n"
+ 1038      2030 3132 
+ 1038      3334 3536 
+ 1038      3738 3941 
+ 1038      4243 4445 
+ 1041               	__c.2364:
+ 1042 0027 0A00      		.string	"\n"
+ 1045               	__c.2362:
+ 1046 0029 2530 3258 		.string	"%02X"
+ 1046      00
+ 1049               	__c.2360:
+ 1050 002e 626F 756E 		.string	"bounce!: "
+ 1050      6365 213A 
+ 1050      2000 
+ 1051               		.local	matrix_debouncing
+ 1052               		.comm	matrix_debouncing,10,1
+ 1053               		.local	matrix
+ 1054               		.comm	matrix,10,1
+ 1055               		.data
+ 1058               	debouncing:
+ 1059 0000 05        		.byte	5
+ 1060               		.text
+ 1061               	.Letext0:
+ 1062               		.file 4 "/usr/lib/avr/include/stdint.h"
+ 1063               		.file 5 "../../common/debug.h"
+ 1064               		.file 6 "../../common/matrix.h"
+ 1065               		.file 7 "../../common/action_layer.h"
+ 1066               		.file 8 "../../common/avr/xprintf.h"
+ 1067               		.file 9 "../../common/util.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 matrix.c
+     /tmp/cc3zcFWF.s:2      *ABS*:000000000000003e __SP_H__
+     /tmp/cc3zcFWF.s:3      *ABS*:000000000000003d __SP_L__
+     /tmp/cc3zcFWF.s:4      *ABS*:000000000000003f __SREG__
+     /tmp/cc3zcFWF.s:5      *ABS*:0000000000000000 __tmp_reg__
+     /tmp/cc3zcFWF.s:6      *ABS*:0000000000000001 __zero_reg__
+     /tmp/cc3zcFWF.s:12     .text.unselect_rows:0000000000000000 unselect_rows
+     /tmp/cc3zcFWF.s:36     .text.matrix_power_up:0000000000000000 matrix_power_up
+     /tmp/cc3zcFWF.s:52     .text.matrix_power_down:0000000000000000 matrix_power_down
+     /tmp/cc3zcFWF.s:67     .text.matrix_rows:0000000000000000 matrix_rows
+     /tmp/cc3zcFWF.s:84     .text.matrix_cols:0000000000000000 matrix_cols
+     /tmp/cc3zcFWF.s:101    .text.matrix_init:0000000000000000 matrix_init
+     /tmp/cc3zcFWF.s:1052   .bss:000000000000000a matrix
+                             .bss:0000000000000000 matrix_debouncing
+     /tmp/cc3zcFWF.s:169    .text.matrix_scan:0000000000000000 matrix_scan
+     /tmp/cc3zcFWF.s:1058   .data:0000000000000000 debouncing
+     /tmp/cc3zcFWF.s:1049   .progmem.data:000000000000002e __c.2360
+     /tmp/cc3zcFWF.s:1045   .progmem.data:0000000000000029 __c.2362
+     /tmp/cc3zcFWF.s:1041   .progmem.data:0000000000000027 __c.2364
+     /tmp/cc3zcFWF.s:741    .text.matrix_is_modified:0000000000000000 matrix_is_modified
+     /tmp/cc3zcFWF.s:763    .text.matrix_is_on:0000000000000000 matrix_is_on
+     /tmp/cc3zcFWF.s:806    .text.matrix_get_row:0000000000000000 matrix_get_row
+     /tmp/cc3zcFWF.s:833    .text.matrix_print:0000000000000000 matrix_print
+     /tmp/cc3zcFWF.s:1037   .progmem.data:0000000000000010 __c.2391
+     /tmp/cc3zcFWF.s:1033   .progmem.data:000000000000000b __c.2394
+     /tmp/cc3zcFWF.s:1025   .progmem.data:0000000000000002 __c.2398
+     /tmp/cc3zcFWF.s:1029   .progmem.data:0000000000000008 __c.2396
+     /tmp/cc3zcFWF.s:1021   .progmem.data:0000000000000000 __c.2400
+     /tmp/cc3zcFWF.s:966    .text.matrix_key_count:0000000000000000 matrix_key_count
+
+UNDEFINED SYMBOLS
+debug_config
+xputs
+__xprintf
+layer_state
+biton32
+bitrev16
+bitpop16
+__do_copy_data
+__do_clear_bss
