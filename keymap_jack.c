@@ -10,7 +10,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 	[1] = KEYMAP(ESC,   F1,   F2,   F3,   F4,   F5,   F6,   F7,   F8,   F9,   F10,  F11, F12, BSPC, \
   		     TAB,  TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, 7,    8,    9,    TRNS, TRNS, INS, MSTP, MPLY, \
   		     TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, 4,    5,    6, TRNS, TRNS, TRNS, MSEL, \
-  		     LSFT, TRNS, TRNS, TRNS, TRNS, TRNS, TRNS, 1,    2,    3, TRNS, RSFT, VOLU, PAUS, \
+  		     LSFT, TRNS, TRNS, TRNS, TRNS, TRNS,    0, 1,    2,    3, TRNS, RSFT, VOLU, PAUS, \
   		     RCTL, APP, RALT,                  SPC,                     BSLS, MUTE, MPRV, VOLD, MNXT) 
 };
 
